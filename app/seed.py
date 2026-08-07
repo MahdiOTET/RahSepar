@@ -6,7 +6,7 @@ import asyncpg
 from app.config import settings
 from app.security import hash_password
 
-DEV_PASSWORD = "devpass"
+DEV_PASSWORD = "DevPass123!"
 
 
 async def upsert_user(

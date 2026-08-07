@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-
+from app.api import router as api_router
 from app.db import create_pool
 
 
@@ -17,7 +17,11 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    application = FastAPI(title="Intercity Bus Ticket Booking", version="1.0.0")
+    application = FastAPI(
+        title="Intercity Bus Ticket Booking", version="1.0.0", lifespan=lifespan
+    )
+
+    application.include_router(api_router, prefix="/api/v1")
 
     @application.get("/health", tags=["system"])
     async def health() -> dict[str, str]:
