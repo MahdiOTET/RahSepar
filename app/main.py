@@ -1,4 +1,19 @@
 from fastapi import FastAPI
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from app.db import create_pool
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    pool = await create_pool()
+    application.state.database_pool = pool
+
+    try:
+        yield
+    finally:
+        await pool.close()
 
 
 def create_app() -> FastAPI:
