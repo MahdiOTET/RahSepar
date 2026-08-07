@@ -2,6 +2,7 @@ import argparse
 import uvicorn
 import asyncio
 from app.migrate import run_migrations
+from app.seed import seed_development_data
 
 
 def main() -> None:
@@ -15,12 +16,15 @@ def main() -> None:
 
     commands.add_parser("migrate", help="Apply Pending Database Migrations")
 
+    commands.add_parser("seed", help="Insert Development Data")
     args = parser.parse_args()
 
     if args.command == "serve":
         uvicorn.run("app.main:app", host=args.host, port=args.port, reload=args.reload)
     elif args.command == "migrate":
         asyncio.run(run_migrations())
+    elif args.command == "seed":
+        asyncio.run(seed_development_data())
 
 
 if __name__ == "__main__":
