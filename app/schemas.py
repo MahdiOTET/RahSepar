@@ -64,3 +64,30 @@ class BookingCancellationResponse(BaseModel):
     cancelled_at: datetime
     refunded_amount: Decimal
     remaining_wallet_balance: Decimal
+
+
+class BusImportItem(BaseModel):
+    origin: str = Field(min_length=2, max_length=100)
+    destination: str = Field(min_length=2, max_length=100)
+    plate_number: str = Field(min_length=1, max_length=20)
+    model: str | None = Field(default=None, max_length=100)
+    capacity: int = Field(ge=1, le=100)
+
+
+class BusImportRequest(BaseModel):
+    buses: list[BusImportItem] = Field(min_length=1, max_length=1000)
+
+
+class BusResponse(BaseModel):
+    id: int
+    origin: str
+    destination: str
+    plate_number: str
+    model: str | None
+    capacity: int
+    is_active: bool
+
+
+class BusImportResponse(BaseModel):
+    imported_count: int
+    buses: list[BusResponse]

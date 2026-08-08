@@ -12,6 +12,8 @@ from app.schemas import (
     BookingCreateRequest,
     BookingResponse,
     BookingCancellationResponse,
+    BusImportRequest,
+    BusImportResponse,
 )
 from app.service import (
     InvalidCredentialError,
@@ -20,11 +22,13 @@ from app.service import (
     BookingNotFoundError,
     BookingValidationError,
     BookingConflictError,
+    BusImportValidationError,
     list_available_tickets,
     authenticate_user,
     resolve_access_token,
     create_booking,
     cancel_booking,
+    import_buses,
 )
 
 router = APIRouter()
@@ -161,4 +165,33 @@ async def cancel_existing_booking(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(err),
+        ) from err
+
+
+async def require_operator(
+    user: Annotated[CurrentUserResponse, Depends(get_current_user)],
+) -> CurrentUserResponse:
+    if "operator" not in user.profiles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Operator profile is required"
+        )
+
+    return user
+
+
+@router.post(
+    "/buses", response_model=BusImportResponse, status_code=status.HTTP_201_CREATED
+)
+async def bulk_import_buses(
+    request_data: BusImportRequest,
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    operator: Annotated[CurrentUserResponse, Depends(require_operator)],
+) -> BusImportResponse:
+
+    try:
+        return await import_buses(pool=pool, buses=request_data.buses)
+
+    except BusImportValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(err)
         ) from err

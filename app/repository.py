@@ -356,3 +356,75 @@ async def insert_booking_refund(
         booking_id,
         amount,
     )
+
+
+async def upsert_route(
+    connection: asyncpg.Connection,
+    origin: str,
+    destination: str,
+) -> int:
+    return await connection.fetchval(
+        """
+            INSERT INTO routes(
+                origin,
+                destination
+            )
+            VALUES($1, $2)
+            ON CONFLICT (origin, destination)
+            DO UPDATE SET
+                origin = EXCLUDED.origin
+            RETURNING id
+        """,
+        origin,
+        destination,
+    )
+
+
+async def upsert_bus(
+    connection: asyncpg.Connection,
+    route_id: int,
+    plate_number: str,
+    model: str | None,
+    capacity: int,
+) -> asyncpg.Record:
+    return await connection.fetchrow(
+        """
+            WITH imported_bus AS(
+                INSERT INTO buses(
+                    route_id,
+                    plate_number,
+                    model,
+                    capacity
+                )
+                VALUES($1, $2, $3, $4)
+                ON CONFLICT (plate_number)
+                DO UPDATE SET
+                    route_id = EXCLUDED.route_id,
+                    model = EXCLUDED.model,
+                    capacity = EXCLUDED.capacity,
+                    is_active = TRUE
+                RETURNING
+                    id,
+                    route_id,
+                    plate_number,
+                    model,
+                    capacity,
+                    is_active
+            )
+            SELECT
+                imported_bus.id,
+                route.origin,
+                route.destination,
+                imported_bus.plate_number,
+                imported_bus.model,
+                imported_bus.capacity,
+                imported_bus.is_active
+            FROM imported_bus
+            JOIN routes AS route
+                ON route.id = imported_bus.route_id
+        """,
+        route_id,
+        plate_number,
+        model,
+        capacity,
+    )

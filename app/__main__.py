@@ -150,6 +150,45 @@ def cancel_booking_via_api(booking_id: int) -> None:
     print(json.dumps(response.json(), indent=2, ensure_ascii=False))
 
 
+def import_buses_via_api(file_path: Path) -> None:
+    if not TOKEN_FILE.exists():
+        print("No token found. Run the login command first.")
+        return
+
+    token = TOKEN_FILE.read_text(encoding="utf-8").strip()
+
+    try:
+        request_data = json.loads(file_path.read_text(encoding="utf-8"))
+
+    except OSError as err:
+        print(f"Could not read import file: {err}")
+        return
+
+    except json.JSONDecodeError as err:
+        print(f"Import file contains invalid JSON: {err}")
+        return
+
+    try:
+        response = httpx.post(
+            f"{API_BASE_URL}/buses",
+            headers={"Authorization": f"Bearer {token}"},
+            json=request_data,
+            timeout=30,
+        )
+
+    except httpx.RequestError as err:
+        print(f"Could not connect to backend: {err}")
+        return
+
+    if response.is_error:
+        print(f"Bus import failed ({response.status_code}):")
+        print(response.text)
+        return
+
+    print("Buses imported successfully.")
+    print(json.dumps(response.json(), indent=2, ensure_ascii=False))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bus Ticket Booking Application")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -184,6 +223,11 @@ def main() -> None:
     cancel_command = commands.add_parser("cancel", help="Cancel a booking")
     cancel_command.add_argument("--booking-id", type=int, required=True)
 
+    import_buses_command = commands.add_parser(
+        "import-buses", help="Import buses from a JSON file"
+    )
+    import_buses_command.add_argument("--file", type=Path, required=True)
+
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -209,6 +253,8 @@ def main() -> None:
         book_trip_via_api(trip_id=args.trip_id, seat_number=args.seat_number)
     elif args.command == "cancel":
         cancel_booking_via_api(booking_id=args.booking_id)
+    elif args.command == "import-buses":
+        import_buses_via_api(file_path=args.file)
 
 
 if __name__ == "__main__":

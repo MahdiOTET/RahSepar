@@ -14,6 +14,8 @@ from app.repository import (
     mark_booking_cancelled,
     credit_wallet,
     insert_booking_refund,
+    upsert_route,
+    upsert_bus,
 )
 from app.security import (
     create_access_token,
@@ -26,6 +28,9 @@ from app.schemas import (
     TicketSort,
     BookingResponse,
     BookingCancellationResponse,
+    BusResponse,
+    BusImportItem,
+    BusImportResponse,
 )
 
 
@@ -227,4 +232,54 @@ async def cancel_booking(
                 cancelled_at=cancelled_booking["cancelled_at"],
                 refunded_amount=cancelled_booking["paid_price"],
                 remaining_wallet_balance=remaining_balance,
+            )
+
+
+class BusImportValidationError(Exception):
+    pass
+
+
+async def import_buses(
+    pool: asyncpg.Pool,
+    buses: list[BusImportItem],
+) -> BusImportResponse:
+    imported_buses: list[BusResponse] = []
+
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            for bus in buses:
+                origin = bus.origin.strip()
+                destination = bus.destination.strip()
+                plate_number = bus.plate_number.strip()
+                model = bus.model.strip() if bus.model else None
+
+                if len(origin) < 2 or len(destination) < 2:
+                    raise BusImportValidationError(
+                        "Origin and destination must contain at least two characters"
+                    )
+
+                if origin.casefold() == destination.casefold():
+                    raise BusImportValidationError(
+                        "Origin and destination must be different"
+                    )
+
+                if not plate_number:
+                    raise BusImportValidationError("Plate number must not be empty")
+
+                route_id = await upsert_route(
+                    connection=connection, origin=origin, destination=destination
+                )
+
+                imported_bus = await upsert_bus(
+                    connection=connection,
+                    route_id=route_id,
+                    plate_number=plate_number,
+                    model=model,
+                    capacity=bus.capacity,
+                )
+
+                imported_buses.append(BusResponse(**dict(imported_bus)))
+
+            return BusImportResponse(
+                imported_count=len(imported_buses), buses=imported_buses
             )
