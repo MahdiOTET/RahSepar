@@ -1,5 +1,8 @@
 *.pdf
 venv/
 .env
-app/__pycache__/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 .development-token
+buses.json
