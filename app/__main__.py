@@ -231,6 +231,33 @@ def create_trip_via_api(
     print(json.dumps(response.json(), indent=2, ensure_ascii=False))
 
 
+def show_operator_report(path: str, parameters: dict[str, str | int]) -> None:
+    if not TOKEN_FILE.exists():
+        print("No token found. Run the login command first.")
+        return
+
+    token = TOKEN_FILE.read_text(encoding="utf-8").strip()
+
+    try:
+        response = httpx.get(
+            f"{API_BASE_URL}/{path}",
+            headers={"Authorization": f"Bearer {token}"},
+            params=parameters,
+            timeout=30,
+        )
+
+    except httpx.RequestError as err:
+        print(f"Could not connect to backend: {err}")
+        return
+
+    if response.is_error:
+        print(f"Report request failed ({response.status_code}):")
+        print(response.text)
+        return
+
+    print(json.dumps(response.json(), indent=2, ensure_ascii=False))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bus Ticket Booking Application")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -279,6 +306,24 @@ def main() -> None:
     create_trip_command.add_argument("--arrival-time", required=True)
     create_trip_command.add_argument("--price", required=True)
 
+    hourly_report_command = commands.add_parser(
+        "hourly-report", help="Show confirmed bookings by Tehran hour"
+    )
+    hourly_report_command.add_argument("--date", required=True)
+
+    monthly_bus_report_command = commands.add_parser(
+        "monthly-bus-report", help="Show monthly bus performance"
+    )
+    monthly_bus_report_command.add_argument("--year", type=int, required=True)
+    monthly_bus_report_command.add_argument("--month", type=int, required=True)
+
+    busiest_drivers_command = commands.add_parser(
+        "busiest-drivers", help="Show the busiest drivers for a date range"
+    )
+    busiest_drivers_command.add_argument("--date-from", required=True)
+    busiest_drivers_command.add_argument("--date-to", required=True)
+    busiest_drivers_command.add_argument("--limit", type=int, default=10)
+
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -313,6 +358,25 @@ def main() -> None:
             departure_time=args.departure_time,
             arrival_time=args.arrival_time,
             price=args.price,
+        )
+    elif args.command == "hourly-report":
+        show_operator_report(
+            path="reports/hourly-bookings",
+            parameters={"report_date": args.date},
+        )
+    elif args.command == "monthly-bus-report":
+        show_operator_report(
+            path="reports/monthly-buses",
+            parameters={"year": args.year, "month": args.month},
+        )
+    elif args.command == "busiest-drivers":
+        show_operator_report(
+            path="reports/busiest-drivers",
+            parameters={
+                "date_from": args.date_from,
+                "date_to": args.date_to,
+                "limit": args.limit,
+            },
         )
 
 

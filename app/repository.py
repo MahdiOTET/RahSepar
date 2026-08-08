@@ -1,5 +1,5 @@
 import asyncpg
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 
@@ -561,4 +561,138 @@ async def insert_trip(
         departure_time,
         arrival_time,
         price,
+    )
+
+
+async def get_hourly_booking_report(
+    pool: asyncpg.Pool,
+    report_date: date,
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            WITH report_bounds AS (
+                SELECT
+                    ($1::DATE::TIMESTAMP AT TIME ZONE 'Asia/Tehran') AS start_at
+            ),
+            report_hours AS (
+                SELECT generate_series(0, 23) AS hour
+            )
+            SELECT
+                report_hours.hour::INTEGER AS hour,
+                count(booking.id)::INTEGER AS confirmed_bookings,
+                coalesce(sum(booking.paid_price), 0)::NUMERIC(12, 2) AS revenue
+            FROM report_hours
+            CROSS JOIN report_bounds
+            LEFT JOIN bookings AS booking
+                ON booking.status = 'confirmed'
+                AND booking.booked_at >= (
+                    report_bounds.start_at
+                    + report_hours.hour * INTERVAL '1 hour'
+                )
+                AND booking.booked_at < (
+                    report_bounds.start_at
+                    + (report_hours.hour + 1) * INTERVAL '1 hour'
+                )
+            GROUP BY report_hours.hour
+            ORDER BY report_hours.hour
+        """,
+        report_date,
+    )
+
+
+async def get_monthly_bus_report(
+    pool: asyncpg.Pool,
+    year: int,
+    month: int,
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            WITH report_bounds AS (
+                SELECT
+                    (
+                        make_date($1, $2, 1)::TIMESTAMP
+                        AT TIME ZONE 'Asia/Tehran'
+                    ) AS start_at,
+                    (
+                        (
+                            make_date($1, $2, 1) + INTERVAL '1 month'
+                        )::TIMESTAMP AT TIME ZONE 'Asia/Tehran'
+                    ) AS end_at
+            )
+            SELECT
+                bus.id AS bus_id,
+                bus.plate_number,
+                bus.model,
+                count(DISTINCT trip.id)::INTEGER AS trip_count,
+                count(booking.id)::INTEGER AS confirmed_bookings,
+                coalesce(sum(booking.paid_price), 0)::NUMERIC(12, 2) AS revenue
+            FROM buses AS bus
+            CROSS JOIN report_bounds
+            LEFT JOIN trips AS trip
+                ON trip.bus_id = bus.id
+                AND trip.status <> 'cancelled'
+                AND trip.departure_time >= report_bounds.start_at
+                AND trip.departure_time < report_bounds.end_at
+            LEFT JOIN bookings AS booking
+                ON booking.trip_id = trip.id
+                AND booking.status = 'confirmed'
+            GROUP BY
+                bus.id,
+                bus.plate_number,
+                bus.model
+            ORDER BY
+                trip_count DESC,
+                confirmed_bookings DESC,
+                bus.id
+        """,
+        year,
+        month,
+    )
+
+
+async def get_busiest_drivers_report(
+    pool: asyncpg.Pool,
+    date_from: date,
+    date_to: date,
+    limit: int,
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            WITH report_bounds AS (
+                SELECT
+                    ($1::DATE::TIMESTAMP AT TIME ZONE 'Asia/Tehran') AS start_at,
+                    (
+                        ($2::DATE + 1)::TIMESTAMP
+                        AT TIME ZONE 'Asia/Tehran'
+                    ) AS end_at
+            )
+            SELECT
+                driver.id AS driver_profile_id,
+                driver.display_name AS driver_name,
+                count(DISTINCT trip.id)::INTEGER AS trip_count,
+                count(booking.id)::INTEGER AS confirmed_bookings
+            FROM profiles AS driver
+            CROSS JOIN report_bounds
+            LEFT JOIN trips AS trip
+                ON trip.driver_profile_id = driver.id
+                AND trip.status <> 'cancelled'
+                AND trip.departure_time >= report_bounds.start_at
+                AND trip.departure_time < report_bounds.end_at
+            LEFT JOIN bookings AS booking
+                ON booking.trip_id = trip.id
+                AND booking.status = 'confirmed'
+            WHERE driver.profile_type = 'driver'
+            GROUP BY
+                driver.id,
+                driver.display_name
+            HAVING count(DISTINCT trip.id) > 0
+            ORDER BY
+                trip_count DESC,
+                confirmed_bookings DESC,
+                driver.id
+            LIMIT $3
+        """,
+        date_from,
+        date_to,
+        limit,
     )

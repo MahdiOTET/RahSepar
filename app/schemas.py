@@ -1,6 +1,6 @@
 from typing import Literal
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 
@@ -114,3 +114,45 @@ class TripResponse(BaseModel):
     arrival_time: datetime
     price: Decimal
     status: Literal["scheduled"]
+
+
+class HourlyBookingReportRow(BaseModel):
+    hour: int = Field(ge=0, le=23)
+    confirmed_bookings: int
+    revenue: Decimal
+
+
+class HourlyBookingReportResponse(BaseModel):
+    report_date: date
+    timezone: Literal["Asia/Tehran"] = "Asia/Tehran"
+    total_confirmed_bookings: int
+    total_revenue: Decimal
+    hours: list[HourlyBookingReportRow]
+
+
+class MonthlyBusReportRow(BaseModel):
+    bus_id: int
+    plate_number: str
+    model: str | None
+    trip_count: int
+    confirmed_bookings: int
+    revenue: Decimal
+
+
+class MonthlyBusReportResponse(BaseModel):
+    year: int
+    month: int
+    buses: list[MonthlyBusReportRow]
+
+
+class BusiestDriverReportRow(BaseModel):
+    driver_profile_id: int
+    driver_name: str
+    trip_count: int
+    confirmed_bookings: int
+
+
+class BusiestDriversReportResponse(BaseModel):
+    date_from: date
+    date_to: date
+    drivers: list[BusiestDriverReportRow]

@@ -1,5 +1,5 @@
 import asyncpg
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from app.repository import (
@@ -20,6 +20,9 @@ from app.repository import (
     get_trip_creation_context,
     get_trip_schedule_conflicts,
     insert_trip,
+    get_hourly_booking_report,
+    get_monthly_bus_report,
+    get_busiest_drivers_report,
 )
 from app.security import (
     create_access_token,
@@ -36,6 +39,12 @@ from app.schemas import (
     BusImportItem,
     BusImportResponse,
     TripResponse,
+    HourlyBookingReportRow,
+    HourlyBookingReportResponse,
+    MonthlyBusReportRow,
+    MonthlyBusReportResponse,
+    BusiestDriverReportRow,
+    BusiestDriversReportResponse,
 )
 
 
@@ -363,3 +372,60 @@ async def create_trip(
             )
 
             return TripResponse(**dict(trip))
+
+
+class ReportValidationError(Exception):
+    pass
+
+
+async def build_hourly_booking_report(
+    pool: asyncpg.Pool,
+    report_date: date,
+) -> HourlyBookingReportResponse:
+    rows = await get_hourly_booking_report(pool, report_date)
+    hours = [HourlyBookingReportRow(**dict(row)) for row in rows]
+
+    return HourlyBookingReportResponse(
+        report_date=report_date,
+        total_confirmed_bookings=sum(row.confirmed_bookings for row in hours),
+        total_revenue=sum((row.revenue for row in hours), Decimal("0.00")),
+        hours=hours,
+    )
+
+
+async def build_monthly_bus_report(
+    pool: asyncpg.Pool,
+    year: int,
+    month: int,
+) -> MonthlyBusReportResponse:
+    if year < 2000 or year > 2100:
+        raise ReportValidationError("Year must be between 2000 and 2100")
+
+    if month < 1 or month > 12:
+        raise ReportValidationError("Month must be between 1 and 12")
+
+    rows = await get_monthly_bus_report(pool, year, month)
+
+    return MonthlyBusReportResponse(
+        year=year,
+        month=month,
+        buses=[MonthlyBusReportRow(**dict(row)) for row in rows],
+    )
+
+
+async def build_busiest_drivers_report(
+    pool: asyncpg.Pool,
+    date_from: date,
+    date_to: date,
+    limit: int,
+) -> BusiestDriversReportResponse:
+    if date_to < date_from:
+        raise ReportValidationError("date_to must not be before date_from")
+
+    rows = await get_busiest_drivers_report(pool, date_from, date_to, limit)
+
+    return BusiestDriversReportResponse(
+        date_from=date_from,
+        date_to=date_to,
+        drivers=[BusiestDriverReportRow(**dict(row)) for row in rows],
+    )

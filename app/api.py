@@ -1,4 +1,5 @@
 import asyncpg
+from datetime import date
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -16,6 +17,9 @@ from app.schemas import (
     BusImportResponse,
     TripCreateRequest,
     TripResponse,
+    HourlyBookingReportResponse,
+    MonthlyBusReportResponse,
+    BusiestDriversReportResponse,
 )
 from app.service import (
     InvalidCredentialError,
@@ -35,6 +39,10 @@ from app.service import (
     TripValidationError,
     TripConflictError,
     create_trip,
+    ReportValidationError,
+    build_hourly_booking_report,
+    build_monthly_bus_report,
+    build_busiest_drivers_report,
 )
 
 router = APIRouter()
@@ -238,5 +246,61 @@ async def create_scheduled_trip(
     except TripConflictError as err:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(err),
+        ) from err
+
+
+@router.get(
+    "/reports/hourly-bookings",
+    response_model=HourlyBookingReportResponse,
+)
+async def hourly_booking_report(
+    report_date: date,
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    operator: Annotated[CurrentUserResponse, Depends(require_operator)],
+) -> HourlyBookingReportResponse:
+    return await build_hourly_booking_report(pool, report_date)
+
+
+@router.get(
+    "/reports/monthly-buses",
+    response_model=MonthlyBusReportResponse,
+)
+async def monthly_bus_report(
+    year: Annotated[int, Query(ge=2000, le=2100)],
+    month: Annotated[int, Query(ge=1, le=12)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    operator: Annotated[CurrentUserResponse, Depends(require_operator)],
+) -> MonthlyBusReportResponse:
+    try:
+        return await build_monthly_bus_report(pool, year, month)
+    except ReportValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(err),
+        ) from err
+
+
+@router.get(
+    "/reports/busiest-drivers",
+    response_model=BusiestDriversReportResponse,
+)
+async def busiest_drivers_report(
+    date_from: date,
+    date_to: date,
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    operator: Annotated[CurrentUserResponse, Depends(require_operator)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+) -> BusiestDriversReportResponse:
+    try:
+        return await build_busiest_drivers_report(
+            pool=pool,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
+    except ReportValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(err),
         ) from err
