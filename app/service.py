@@ -1,7 +1,12 @@
 import asyncpg
 
-from app.repository import get_user_by_mobile
-from app.security import create_access_token, verify_password
+from app.repository import get_user_by_mobile, get_user_with_profiles
+from app.security import (
+    create_access_token,
+    verify_password,
+    TokenValidationError,
+    decode_access_token,
+)
 
 
 class InvalidCredentialError(Exception):
@@ -25,3 +30,22 @@ async def authenticate_user(
         raise InvalidCredentialError()
 
     return create_access_token(user["id"])
+
+
+class InvalidAccessTokenError(Exception):
+    pass
+
+
+async def resolve_access_token(pool: asyncpg.Pool, token: str) -> asyncpg.Record:
+    try:
+        user_id = decode_access_token(token)
+
+    except TokenValidationError as err:
+        raise InvalidAccessTokenError() from err
+
+    user = await get_user_with_profiles(pool, user_id)
+
+    if user is None or not user["is_active"]:
+        raise InvalidAccessTokenError()
+
+    return user

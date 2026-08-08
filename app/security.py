@@ -30,3 +30,26 @@ def create_access_token(user_id: int) -> str:
     }
 
     return jwt.encode(payload, settings.jwt_secret, algorithm=JWT_ALGORITHM)
+
+
+class TokenValidationError(Exception):
+    pass
+
+
+def decode_access_token(token: str) -> int:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[JWT_ALGORITHM],
+            options={"require": ["sub", "iat", "exp"]},
+        )
+        user_id = int(payload["sub"])
+
+        if user_id <= 0:
+            raise ValueError("Invalid user ID")
+
+        return user_id
+
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError) as err:
+        raise TokenValidationError() from err

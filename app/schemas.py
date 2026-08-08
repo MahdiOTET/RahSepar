@@ -15,3 +15,9 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
+
+
+class CurrentUserResponse(BaseModel):
+    id: int
+    mobile: str
+    profiles: list[str]
