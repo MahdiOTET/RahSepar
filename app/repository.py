@@ -1,4 +1,5 @@
 import asyncpg
+from decimal import Decimal
 
 
 async def get_user_by_mobile(pool: asyncpg.Pool, mobile: str) -> asyncpg.Record | None:
@@ -42,4 +43,316 @@ async def get_user_with_profiles(
                 u.is_active
             """,
         user_id,
+    )
+
+
+async def get_available_tickets(
+    pool: asyncpg.Pool,
+    origin: str | None,
+    destination: str | None,
+    sort: str,
+    limit: int,
+    offset: int,
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            SELECT
+                t.id AS trip_id,
+                r.origin,
+                r.destination,
+                t.departure_time,
+                t.arrival_time,
+                t.price,
+                b.model AS bus_model,
+                b.capacity,
+                (
+                    b.capacity - count(booking.id)
+                )::INTEGER AS available_seats
+            FROM trips AS t
+            JOIN buses AS b
+                ON t.bus_id = b.id 
+            JOIN routes AS r
+                ON b.route_id = r.id
+            LEFT JOIN bookings AS booking
+                ON t.id = booking.trip_id
+                AND booking.status = 'confirmed'
+            WHERE t.status = 'scheduled'
+                AND t.departure_time > NOW()
+                AND (
+                        $1::VARCHAR IS NULL
+                        OR lower(r.origin) = lower($1)
+                    )
+                AND (
+                        $2::VARCHAR IS NULL
+                        OR lower(r.destination) = lower($2)
+                    )
+                GROUP BY
+                    t.id,
+                    r.origin,
+                    r.destination,
+                    t.departure_time,
+                    t.arrival_time,
+                    t.price,
+                    b.model,
+                    b.capacity
+                HAVING count(booking.id) < b.capacity
+                ORDER BY
+                    CASE
+                        WHEN $3::TEXT = 'price_asc'
+                        THEN t.price
+                    END ASC,
+                    CASE
+                        WHEN $3::TEXT = 'price_desc'
+                        THEN t.price
+                    END DESC,
+                    t.departure_time ASC,
+                    t.id ASC
+                LIMIT $4
+                OFFSET $5                 
+        """,
+        origin,
+        destination,
+        sort,
+        limit,
+        offset,
+    )
+
+
+async def get_booking_context(
+    connection: asyncpg.Connection, user_id: int, trip_id: int
+) -> tuple[asyncpg.Record | None, int | None, asyncpg.Record | None]:
+    user = await connection.fetchrow(
+        """
+            SELECT id, wallet_balance
+            FROM users
+            WHERE id = $1
+            AND is_active = TRUE
+            FOR UPDATE
+        """,
+        user_id,
+    )
+
+    if user is None:
+        return None, None, None
+
+    passenger_profile_id = await connection.fetchval(
+        """
+            SELECT id
+            FROM profiles
+            WHERE user_id = $1
+            AND profile_type = 'passenger'
+        """,
+        user_id,
+    )
+
+    trip = await connection.fetchrow(
+        """
+            SELECT
+                t.id,
+                t.price,
+                t.status,
+                t.departure_time,
+                b.capacity,
+                (
+                    SELECT count(*)
+                    FROM bookings AS existing_booking
+                    WHERE existing_booking.trip_id = t.id
+                    AND existing_booking.status = 'confirmed'
+                ) AS confirmed_bookings
+            FROM trips AS t
+            JOIN buses AS b
+                ON b.id = t.bus_id
+            WHERE t.id = $1
+            FOR SHARE OF t, b
+        """,
+        trip_id,
+    )
+
+    return user, passenger_profile_id, trip
+
+
+async def count_passenger_bookings_today(
+    connection: asyncpg.Connection,
+    passenger_profile_id: int,
+) -> int:
+    return await connection.fetchval(
+        """
+            SELECT count(*)
+            FROM bookings
+            WHERE passenger_profile_id = $1
+            AND booked_at >= (
+                                date_trunc('day',
+                                            now() AT TIME ZONE 'Asia/Tehran'
+                                            ) AT TIME ZONE 'Asia/Tehran'
+                            )
+            AND booked_at < (
+                                (
+                                    date_trunc(
+                                                'day',
+                                                now() AT TIME ZONE 'Asia/Tehran'
+                                                ) + INTERVAL '1 day'
+                                ) AT TIME ZONE 'Asia/Tehran'
+                            ) 
+        """,
+        passenger_profile_id,
+    )
+
+
+async def insert_confirmed_booking(
+    connection: asyncpg.Connection,
+    passenger_profile_id: int,
+    trip_id: int,
+    seat_number: int,
+    paid_price: Decimal,
+) -> asyncpg.Record | None:
+    return await connection.fetchrow(
+        """
+            INSERT INTO bookings(
+                passenger_profile_id,
+                trip_id,
+                seat_number,
+                paid_price
+                )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (trip_id, seat_number)
+                WHERE status = 'confirmed'
+            DO NOTHING
+            RETURNING
+                id,
+                trip_id,
+                seat_number,
+                paid_price,
+                status,
+                booked_at
+        """,
+        passenger_profile_id,
+        trip_id,
+        seat_number,
+        paid_price,
+    )
+
+
+async def debit_wallet(
+    connection: asyncpg.Connection,
+    user_id: int,
+    amount: Decimal,
+) -> Decimal | None:
+    return await connection.fetchval(
+        """
+            UPDATE users
+            SET wallet_balance = wallet_balance - $2
+            where id = $1
+                AND wallet_balance >= $2
+            RETURNING wallet_balance
+        """,
+        user_id,
+        amount,
+    )
+
+
+async def insert_booking_payment(
+    connection: asyncpg.Connection, user_id: int, booking_id: int, amount: Decimal
+) -> None:
+    await connection.execute(
+        """
+            INSERT INTO wallet_transactions (
+                user_id,
+                booking_id,
+                transaction_type,
+                amount
+                )
+            VALUES ($1, $2, 'booking_payment', $3)
+        """,
+        user_id,
+        booking_id,
+        amount,
+    )
+
+
+async def get_booking_for_cancellation(
+    connection: asyncpg.Connection,
+    booking_id: int,
+    user_id: int,
+) -> asyncpg.Record | None:
+    return await connection.fetchrow(
+        """
+            SELECT
+                b.id,
+                b.paid_price,
+                b.status,
+                b.cancelled_at,
+                u.wallet_balance
+            FROM bookings AS b
+            JOIN profiles AS p
+                ON p.id = b.passenger_profile_id
+            JOIN users as u
+                ON u.id = p.user_id
+            WHERE b.id = $1
+                AND u.id = $2
+                AND u.is_active = TRUE
+            FOR UPDATE OF b, u
+        """,
+        booking_id,
+        user_id,
+    )
+
+
+async def mark_booking_cancelled(
+    connection: asyncpg.Connection,
+    booking_id: int,
+) -> asyncpg.Record | None:
+    return await connection.fetchrow(
+        """
+            UPDATE bookings
+            SET
+                status = 'cancelled',
+                cancelled_at = NOW()
+            WHERE id = $1
+                AND status = 'confirmed'
+            RETURNING
+                id,
+                paid_price,
+                status,
+                cancelled_at
+        """,
+        booking_id,
+    )
+
+
+async def credit_wallet(
+    connection: asyncpg.Connection,
+    user_id: int,
+    amount: Decimal,
+) -> Decimal | None:
+    return await connection.fetchval(
+        """
+            UPDATE users
+            SET wallet_balance = wallet_balance + $2
+            WHERE id = $1
+            RETURNING wallet_balance
+        """,
+        user_id,
+        amount,
+    )
+
+
+async def insert_booking_refund(
+    connection: asyncpg.Connection,
+    user_id: int,
+    booking_id: int,
+    amount: Decimal,
+) -> None:
+    await connection.execute(
+        """
+            INSERT INTO wallet_transactions(
+                user_id,
+                booking_id,
+                transaction_type,
+                amount
+            )
+            VALUES($1, $2, 'booking_refund', $3)
+        """,
+        user_id,
+        booking_id,
+        amount,
     )
