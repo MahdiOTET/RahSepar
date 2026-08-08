@@ -1,5 +1,6 @@
 import asyncpg
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from app.repository import (
     get_user_by_mobile,
@@ -16,6 +17,9 @@ from app.repository import (
     insert_booking_refund,
     upsert_route,
     upsert_bus,
+    get_trip_creation_context,
+    get_trip_schedule_conflicts,
+    insert_trip,
 )
 from app.security import (
     create_access_token,
@@ -31,6 +35,7 @@ from app.schemas import (
     BusResponse,
     BusImportItem,
     BusImportResponse,
+    TripResponse,
 )
 
 
@@ -283,3 +288,78 @@ async def import_buses(
             return BusImportResponse(
                 imported_count=len(imported_buses), buses=imported_buses
             )
+
+
+class TripNotFoundError(Exception):
+    pass
+
+
+class TripValidationError(Exception):
+    pass
+
+
+class TripConflictError(Exception):
+    pass
+
+
+async def create_trip(
+    pool: asyncpg.Pool,
+    bus_id: int,
+    driver_profile_id: int,
+    departure_time: datetime,
+    arrival_time: datetime,
+    price: Decimal,
+) -> TripResponse:
+    if departure_time.tzinfo is None or departure_time.utcoffset() is None:
+        raise TripValidationError("Departure time must include a timezone offset")
+
+    if arrival_time.tzinfo is None or arrival_time.utcoffset() is None:
+        raise TripValidationError("Arrival time must include a timezone offset")
+
+    normalized_departure = departure_time.astimezone(UTC)
+    normalized_arrival = arrival_time.astimezone(UTC)
+
+    if normalized_departure <= datetime.now(UTC):
+        raise TripValidationError("Departure time must be in the future")
+
+    if normalized_arrival <= normalized_departure:
+        raise TripValidationError("Arrival time must be after departure time")
+
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            bus, driver = await get_trip_creation_context(
+                connection=connection,
+                bus_id=bus_id,
+                driver_profile_id=driver_profile_id,
+            )
+
+            if bus is None:
+                raise TripNotFoundError("Active bus was not found")
+
+            if driver is None:
+                raise TripNotFoundError("Active driver profile was not found")
+
+            conflicts = await get_trip_schedule_conflicts(
+                connection=connection,
+                bus_id=bus_id,
+                driver_profile_id=driver_profile_id,
+                departure_time=normalized_departure,
+                arrival_time=normalized_arrival,
+            )
+
+            if conflicts["bus_has_conflict"]:
+                raise TripConflictError("Bus already has an overlapping trip")
+
+            if conflicts["driver_has_conflict"]:
+                raise TripConflictError("Driver already has an overlapping trip")
+
+            trip = await insert_trip(
+                connection=connection,
+                bus_id=bus_id,
+                driver_profile_id=driver_profile_id,
+                departure_time=normalized_departure,
+                arrival_time=normalized_arrival,
+                price=price,
+            )
+
+            return TripResponse(**dict(trip))

@@ -14,6 +14,8 @@ from app.schemas import (
     BookingCancellationResponse,
     BusImportRequest,
     BusImportResponse,
+    TripCreateRequest,
+    TripResponse,
 )
 from app.service import (
     InvalidCredentialError,
@@ -29,6 +31,10 @@ from app.service import (
     create_booking,
     cancel_booking,
     import_buses,
+    TripNotFoundError,
+    TripValidationError,
+    TripConflictError,
+    create_trip,
 )
 
 router = APIRouter()
@@ -194,4 +200,43 @@ async def bulk_import_buses(
     except BusImportValidationError as err:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(err)
+        ) from err
+
+
+@router.post(
+    "/trips",
+    response_model=TripResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_scheduled_trip(
+    request_data: TripCreateRequest,
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    operator: Annotated[CurrentUserResponse, Depends(require_operator)],
+) -> TripResponse:
+    try:
+        return await create_trip(
+            pool=pool,
+            bus_id=request_data.bus_id,
+            driver_profile_id=request_data.driver_profile_id,
+            departure_time=request_data.departure_time,
+            arrival_time=request_data.arrival_time,
+            price=request_data.price,
+        )
+
+    except TripNotFoundError as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
+        ) from err
+
+    except TripValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(err),
+        ) from err
+
+    except TripConflictError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(err),
         ) from err

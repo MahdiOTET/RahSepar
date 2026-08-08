@@ -91,3 +91,26 @@ class BusResponse(BaseModel):
 class BusImportResponse(BaseModel):
     imported_count: int
     buses: list[BusResponse]
+
+
+class TripCreateRequest(BaseModel):
+    bus_id: int = Field(gt=0)
+    driver_profile_id: int = Field(gt=0)
+    departure_time: datetime
+    arrival_time: datetime
+    price: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+
+
+class TripResponse(BaseModel):
+    id: int
+    bus_id: int
+    driver_profile_id: int
+    origin: str
+    destination: str
+    plate_number: str
+    bus_model: str | None
+    driver_name: str
+    departure_time: datetime
+    arrival_time: datetime
+    price: Decimal
+    status: Literal["scheduled"]

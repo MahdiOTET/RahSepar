@@ -1,4 +1,5 @@
 import asyncpg
+from datetime import datetime
 from decimal import Decimal
 
 
@@ -427,4 +428,137 @@ async def upsert_bus(
         plate_number,
         model,
         capacity,
+    )
+
+
+async def get_trip_creation_context(
+    connection: asyncpg.Connection,
+    bus_id: int,
+    driver_profile_id: int,
+) -> tuple[asyncpg.Record | None, asyncpg.Record | None]:
+    bus = await connection.fetchrow(
+        """
+            SELECT
+                b.id,
+                b.plate_number,
+                b.model,
+                r.origin,
+                r.destination
+            FROM buses AS b
+            JOIN routes AS r
+                ON r.id = b.route_id
+            WHERE b.id = $1
+              AND b.is_active = TRUE
+            FOR UPDATE OF b
+        """,
+        bus_id,
+    )
+
+    driver = await connection.fetchrow(
+        """
+            SELECT
+                p.id,
+                p.display_name
+            FROM profiles AS p
+            JOIN users AS u
+                ON u.id = p.user_id
+            WHERE p.id = $1
+              AND p.profile_type = 'driver'
+              AND u.is_active = TRUE
+            FOR UPDATE OF p
+        """,
+        driver_profile_id,
+    )
+
+    return bus, driver
+
+
+async def get_trip_schedule_conflicts(
+    connection: asyncpg.Connection,
+    bus_id: int,
+    driver_profile_id: int,
+    departure_time: datetime,
+    arrival_time: datetime,
+) -> asyncpg.Record:
+    return await connection.fetchrow(
+        """
+            SELECT
+                EXISTS (
+                    SELECT 1
+                    FROM trips
+                    WHERE bus_id = $1
+                      AND status = 'scheduled'
+                      AND departure_time < $4
+                      AND arrival_time > $3
+                ) AS bus_has_conflict,
+                EXISTS (
+                    SELECT 1
+                    FROM trips
+                    WHERE driver_profile_id = $2
+                      AND status = 'scheduled'
+                      AND departure_time < $4
+                      AND arrival_time > $3
+                ) AS driver_has_conflict
+        """,
+        bus_id,
+        driver_profile_id,
+        departure_time,
+        arrival_time,
+    )
+
+
+async def insert_trip(
+    connection: asyncpg.Connection,
+    bus_id: int,
+    driver_profile_id: int,
+    departure_time: datetime,
+    arrival_time: datetime,
+    price: Decimal,
+) -> asyncpg.Record:
+    return await connection.fetchrow(
+        """
+            WITH created_trip AS (
+                INSERT INTO trips (
+                    bus_id,
+                    driver_profile_id,
+                    departure_time,
+                    arrival_time,
+                    price
+                )
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING
+                    id,
+                    bus_id,
+                    driver_profile_id,
+                    departure_time,
+                    arrival_time,
+                    price,
+                    status
+            )
+            SELECT
+                created_trip.id,
+                created_trip.bus_id,
+                created_trip.driver_profile_id,
+                route.origin,
+                route.destination,
+                bus.plate_number,
+                bus.model AS bus_model,
+                driver.display_name AS driver_name,
+                created_trip.departure_time,
+                created_trip.arrival_time,
+                created_trip.price,
+                created_trip.status
+            FROM created_trip
+            JOIN buses AS bus
+                ON bus.id = created_trip.bus_id
+            JOIN routes AS route
+                ON route.id = bus.route_id
+            JOIN profiles AS driver
+                ON driver.id = created_trip.driver_profile_id
+        """,
+        bus_id,
+        driver_profile_id,
+        departure_time,
+        arrival_time,
+        price,
     )

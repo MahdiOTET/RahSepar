@@ -1,10 +1,12 @@
 import argparse
-import uvicorn
 import asyncio
 import json
-import httpx
 from getpass import getpass
 from pathlib import Path
+
+import httpx
+import uvicorn
+
 from app.migrate import run_migrations
 from app.seed import seed_development_data
 
@@ -189,25 +191,65 @@ def import_buses_via_api(file_path: Path) -> None:
     print(json.dumps(response.json(), indent=2, ensure_ascii=False))
 
 
+def create_trip_via_api(
+    bus_id: int,
+    driver_profile_id: int,
+    departure_time: str,
+    arrival_time: str,
+    price: str,
+) -> None:
+    if not TOKEN_FILE.exists():
+        print("No token found. Run the login command first.")
+        return
+
+    token = TOKEN_FILE.read_text(encoding="utf-8").strip()
+
+    try:
+        response = httpx.post(
+            f"{API_BASE_URL}/trips",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "bus_id": bus_id,
+                "driver_profile_id": driver_profile_id,
+                "departure_time": departure_time,
+                "arrival_time": arrival_time,
+                "price": price,
+            },
+            timeout=10,
+        )
+
+    except httpx.RequestError as err:
+        print(f"Could not connect to backend: {err}")
+        return
+
+    if response.is_error:
+        print(f"Trip creation failed ({response.status_code}):")
+        print(response.text)
+        return
+
+    print("Trip created successfully.")
+    print(json.dumps(response.json(), indent=2, ensure_ascii=False))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bus Ticket Booking Application")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    serve = commands.add_parser("serve", help="Start the RestAPI")
+    serve = commands.add_parser("serve", help="Start the REST API")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", default=8000, type=int)
     serve.add_argument("--reload", action="store_true")
 
-    commands.add_parser("migrate", help="Apply Pending Database Migrations")
+    commands.add_parser("migrate", help="Apply pending database migrations")
 
-    commands.add_parser("seed", help="Insert Development Data")
+    commands.add_parser("seed", help="Insert development data")
 
-    login_command = commands.add_parser("login", help="Log in Thrugh the REST API")
+    login_command = commands.add_parser("login", help="Log in through the REST API")
     login_command.add_argument("--mobile", required=True)
 
-    commands.add_parser("me", help="Display the Authenricated User Information")
+    commands.add_parser("me", help="Display authenticated user information")
 
-    tickets_command = commands.add_parser("tickets", help="List Available Tickets")
+    tickets_command = commands.add_parser("tickets", help="List available tickets")
     tickets_command.add_argument("--origin")
     tickets_command.add_argument("--destination")
     tickets_command.add_argument(
@@ -216,7 +258,7 @@ def main() -> None:
     tickets_command.add_argument("--limit", type=int, default=20)
     tickets_command.add_argument("--offset", type=int, default=0)
 
-    book_command = commands.add_parser("book", help="Book a Seat")
+    book_command = commands.add_parser("book", help="Book a seat")
     book_command.add_argument("--trip-id", type=int, required=True)
     book_command.add_argument("--seat-number", type=int, required=True)
 
@@ -227,6 +269,15 @@ def main() -> None:
         "import-buses", help="Import buses from a JSON file"
     )
     import_buses_command.add_argument("--file", type=Path, required=True)
+
+    create_trip_command = commands.add_parser(
+        "create-trip", help="Create a scheduled trip"
+    )
+    create_trip_command.add_argument("--bus-id", type=int, required=True)
+    create_trip_command.add_argument("--driver-profile-id", type=int, required=True)
+    create_trip_command.add_argument("--departure-time", required=True)
+    create_trip_command.add_argument("--arrival-time", required=True)
+    create_trip_command.add_argument("--price", required=True)
 
     args = parser.parse_args()
 
@@ -255,6 +306,14 @@ def main() -> None:
         cancel_booking_via_api(booking_id=args.booking_id)
     elif args.command == "import-buses":
         import_buses_via_api(file_path=args.file)
+    elif args.command == "create-trip":
+        create_trip_via_api(
+            bus_id=args.bus_id,
+            driver_profile_id=args.driver_profile_id,
+            departure_time=args.departure_time,
+            arrival_time=args.arrival_time,
+            price=args.price,
+        )
 
 
 if __name__ == "__main__":
