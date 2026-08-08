@@ -269,7 +269,8 @@ def main() -> None:
 
     commands.add_parser("migrate", help="Apply pending database migrations")
 
-    commands.add_parser("seed", help="Insert development data")
+    seed_command = commands.add_parser("seed", help="Insert development data")
+    seed_command.add_argument("--bookings", type=int, default=100_000)
 
     login_command = commands.add_parser("login", help="Log in through the REST API")
     login_command.add_argument("--mobile", required=True)
@@ -331,7 +332,7 @@ def main() -> None:
     elif args.command == "migrate":
         asyncio.run(run_migrations())
     elif args.command == "seed":
-        asyncio.run(seed_development_data())
+        asyncio.run(seed_development_data(booking_count=args.bookings))
     elif args.command == "login":
         password = getpass("Password: ")
         login_via_api(args.mobile, password)

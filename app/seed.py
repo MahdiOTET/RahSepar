@@ -7,6 +7,13 @@ from app.config import settings
 from app.security import hash_password
 
 DEV_PASSWORD = "DevPass123!"
+BULK_BOOKING_PRICE = Decimal("1000000.00")
+BULK_INITIAL_CREDIT = Decimal("50000000.00")
+BULK_BUS_COUNT = 20
+BULK_DRIVER_COUNT = 20
+BULK_ROUTE_COUNT = 5
+BULK_BUS_CAPACITY = 100
+BULK_DAILY_BOOKING_LIMIT = 20
 
 
 async def upsert_user(
@@ -54,7 +61,429 @@ async def upsert_profile(
     )
 
 
-async def seed_development_data() -> None:
+async def seed_bulk_bookings(
+    connection: asyncpg.Connection,
+    hashed_password: str,
+    booking_count: int,
+) -> int:
+    if booking_count < 0:
+        raise ValueError("booking_count must not be negative")
+
+    if booking_count > 1_000_000:
+        raise ValueError("booking_count must not exceed 1,000,000")
+
+    if booking_count == 0:
+        return 0
+
+    passenger_count = (
+        booking_count + BULK_DAILY_BOOKING_LIMIT - 1
+    ) // BULK_DAILY_BOOKING_LIMIT
+    trip_count = (booking_count + BULK_BUS_CAPACITY - 1) // BULK_BUS_CAPACITY
+
+    driver_profile_ids: list[int] = []
+
+    for number in range(1, BULK_DRIVER_COUNT + 1):
+        driver_user_id = await upsert_user(
+            connection=connection,
+            mobile=f"097{number:08d}",
+            hashed_password=hashed_password,
+        )
+        driver_profile_ids.append(
+            await upsert_profile(
+                connection=connection,
+                user_id=driver_user_id,
+                display_name=f"Load Driver {number}",
+                profile_type="driver",
+            )
+        )
+
+    route_ids: list[int] = []
+
+    for number in range(1, BULK_ROUTE_COUNT + 1):
+        route_ids.append(
+            await connection.fetchval(
+                """
+                    INSERT INTO routes (origin, destination)
+                    VALUES ($1, $2)
+                    ON CONFLICT (origin, destination)
+                    DO UPDATE SET origin = EXCLUDED.origin
+                    RETURNING id
+                """,
+                f"Load Origin {number}",
+                f"Load Destination {number}",
+            )
+        )
+
+    bus_ids: list[int] = []
+
+    for number in range(1, BULK_BUS_COUNT + 1):
+        bus_ids.append(
+            await connection.fetchval(
+                """
+                    INSERT INTO buses (
+                        route_id,
+                        plate_number,
+                        model,
+                        capacity
+                    )
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (plate_number)
+                    DO UPDATE SET
+                        route_id = EXCLUDED.route_id,
+                        model = EXCLUDED.model,
+                        capacity = EXCLUDED.capacity,
+                        is_active = TRUE
+                    RETURNING id
+                """,
+                route_ids[(number - 1) % len(route_ids)],
+                f"LOAD-{number:03d}",
+                "Load Test Bus",
+                BULK_BUS_CAPACITY,
+            )
+        )
+
+    await connection.execute(
+        """
+            CREATE TEMP TABLE seed_passenger_data (
+                seed_number INTEGER PRIMARY KEY,
+                mobile VARCHAR(15) NOT NULL,
+                display_name VARCHAR(100) NOT NULL,
+                booked_at TIMESTAMPTZ NOT NULL
+            ) ON COMMIT DROP
+        """
+    )
+
+    booking_anchor = datetime(2026, 1, 1, tzinfo=UTC)
+    passenger_records = [
+        (
+            number,
+            f"098{number:08d}",
+            f"Load Passenger {number}",
+            booking_anchor
+            + timedelta(days=(number - 1) % 30, hours=(number - 1) % 24),
+        )
+        for number in range(1, passenger_count + 1)
+    ]
+
+    await connection.copy_records_to_table(
+        "seed_passenger_data",
+        records=passenger_records,
+        columns=["seed_number", "mobile", "display_name", "booked_at"],
+    )
+
+    await connection.execute(
+        """
+            INSERT INTO users (
+                mobile,
+                password_hash,
+                wallet_balance
+            )
+            SELECT
+                seed.mobile,
+                $1,
+                $2
+            FROM seed_passenger_data AS seed
+            ON CONFLICT (mobile)
+            DO UPDATE SET
+                password_hash = EXCLUDED.password_hash,
+                is_active = TRUE
+        """,
+        hashed_password,
+        BULK_INITIAL_CREDIT,
+    )
+
+    await connection.execute(
+        """
+            INSERT INTO profiles (
+                user_id,
+                display_name,
+                profile_type
+            )
+            SELECT
+                app_user.id,
+                seed.display_name,
+                'passenger'
+            FROM seed_passenger_data AS seed
+            JOIN users AS app_user
+                ON app_user.mobile = seed.mobile
+            ON CONFLICT (user_id, profile_type)
+            DO UPDATE SET
+                display_name = EXCLUDED.display_name
+        """
+    )
+
+    passenger_rows = await connection.fetch(
+        """
+            SELECT
+                seed.seed_number,
+                profile.id AS passenger_profile_id,
+                app_user.id AS user_id,
+                seed.booked_at
+            FROM seed_passenger_data AS seed
+            JOIN users AS app_user
+                ON app_user.mobile = seed.mobile
+            JOIN profiles AS profile
+                ON profile.user_id = app_user.id
+                AND profile.profile_type = 'passenger'
+            ORDER BY seed.seed_number
+        """
+    )
+
+    await connection.execute(
+        """
+            CREATE TEMP TABLE seed_trip_data (
+                seed_number INTEGER PRIMARY KEY,
+                bus_id BIGINT NOT NULL,
+                driver_profile_id BIGINT NOT NULL,
+                departure_time TIMESTAMPTZ NOT NULL,
+                arrival_time TIMESTAMPTZ NOT NULL,
+                price NUMERIC(12, 2) NOT NULL
+            ) ON COMMIT DROP
+        """
+    )
+
+    trip_anchor = datetime(2035, 1, 1, tzinfo=UTC)
+    trip_records = [
+        (
+            number,
+            bus_ids[(number - 1) % len(bus_ids)],
+            driver_profile_ids[(number - 1) % len(driver_profile_ids)],
+            trip_anchor + timedelta(hours=(number - 1) * 12),
+            trip_anchor + timedelta(hours=(number - 1) * 12 + 8),
+            BULK_BOOKING_PRICE,
+        )
+        for number in range(1, trip_count + 1)
+    ]
+
+    await connection.copy_records_to_table(
+        "seed_trip_data",
+        records=trip_records,
+        columns=[
+            "seed_number",
+            "bus_id",
+            "driver_profile_id",
+            "departure_time",
+            "arrival_time",
+            "price",
+        ],
+    )
+
+    await connection.execute(
+        """
+            INSERT INTO trips (
+                bus_id,
+                driver_profile_id,
+                departure_time,
+                arrival_time,
+                price
+            )
+            SELECT
+                seed.bus_id,
+                seed.driver_profile_id,
+                seed.departure_time,
+                seed.arrival_time,
+                seed.price
+            FROM seed_trip_data AS seed
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM trips AS existing_trip
+                WHERE existing_trip.bus_id = seed.bus_id
+                  AND existing_trip.driver_profile_id = seed.driver_profile_id
+                  AND existing_trip.departure_time = seed.departure_time
+            )
+        """
+    )
+
+    trip_rows = await connection.fetch(
+        """
+            SELECT DISTINCT ON (seed.seed_number)
+                seed.seed_number,
+                trip.id AS trip_id
+            FROM seed_trip_data AS seed
+            JOIN trips AS trip
+                ON trip.bus_id = seed.bus_id
+                AND trip.driver_profile_id = seed.driver_profile_id
+                AND trip.departure_time = seed.departure_time
+            ORDER BY seed.seed_number, trip.id
+        """
+    )
+
+    await connection.execute(
+        """
+            CREATE TEMP TABLE seed_booking_data (
+                passenger_profile_id BIGINT NOT NULL,
+                trip_id BIGINT NOT NULL,
+                seat_number SMALLINT NOT NULL,
+                paid_price NUMERIC(12, 2) NOT NULL,
+                booked_at TIMESTAMPTZ NOT NULL
+            ) ON COMMIT DROP
+        """
+    )
+
+    booking_records = []
+
+    for index in range(booking_count):
+        passenger = passenger_rows[index % len(passenger_rows)]
+        trip = trip_rows[index // BULK_BUS_CAPACITY]
+        booking_records.append(
+            (
+                passenger["passenger_profile_id"],
+                trip["trip_id"],
+                index % BULK_BUS_CAPACITY + 1,
+                BULK_BOOKING_PRICE,
+                passenger["booked_at"],
+            )
+        )
+
+    await connection.copy_records_to_table(
+        "seed_booking_data",
+        records=booking_records,
+        columns=[
+            "passenger_profile_id",
+            "trip_id",
+            "seat_number",
+            "paid_price",
+            "booked_at",
+        ],
+    )
+
+    await connection.execute(
+        """
+            INSERT INTO bookings (
+                passenger_profile_id,
+                trip_id,
+                seat_number,
+                paid_price,
+                booked_at
+            )
+            SELECT
+                seed.passenger_profile_id,
+                seed.trip_id,
+                seed.seat_number,
+                seed.paid_price,
+                seed.booked_at
+            FROM seed_booking_data AS seed
+            ON CONFLICT (trip_id, seat_number)
+                WHERE status = 'confirmed'
+            DO UPDATE SET
+                passenger_profile_id = EXCLUDED.passenger_profile_id,
+                paid_price = EXCLUDED.paid_price,
+                booked_at = EXCLUDED.booked_at
+        """
+    )
+
+    await connection.execute(
+        """
+            INSERT INTO wallet_transactions (
+                user_id,
+                booking_id,
+                transaction_type,
+                amount
+            )
+            SELECT
+                profile.user_id,
+                booking.id,
+                'booking_payment',
+                seed.paid_price
+            FROM seed_booking_data AS seed
+            JOIN bookings AS booking
+                ON booking.trip_id = seed.trip_id
+                AND booking.seat_number = seed.seat_number
+                AND booking.status = 'confirmed'
+            JOIN profiles AS profile
+                ON profile.id = seed.passenger_profile_id
+            ON CONFLICT (booking_id, transaction_type)
+            DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                amount = EXCLUDED.amount
+        """
+    )
+
+    await connection.execute(
+        """
+            UPDATE wallet_transactions AS transaction
+            SET amount = $1
+            FROM users AS app_user
+            JOIN seed_passenger_data AS seed
+                ON seed.mobile = app_user.mobile
+            WHERE transaction.user_id = app_user.id
+              AND transaction.transaction_type = 'wallet_credit'
+        """,
+        BULK_INITIAL_CREDIT,
+    )
+
+    await connection.execute(
+        """
+            INSERT INTO wallet_transactions (
+                user_id,
+                transaction_type,
+                amount
+            )
+            SELECT
+                app_user.id,
+                'wallet_credit',
+                $1
+            FROM seed_passenger_data AS seed
+            JOIN users AS app_user
+                ON app_user.mobile = seed.mobile
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM wallet_transactions AS existing_credit
+                WHERE existing_credit.user_id = app_user.id
+                  AND existing_credit.transaction_type = 'wallet_credit'
+            )
+        """,
+        BULK_INITIAL_CREDIT,
+    )
+
+    await connection.execute(
+        """
+            UPDATE users AS app_user
+            SET wallet_balance = (
+                $1
+                - coalesce(
+                    (
+                        SELECT sum(transaction.amount)
+                        FROM wallet_transactions AS transaction
+                        WHERE transaction.user_id = app_user.id
+                          AND transaction.transaction_type = 'booking_payment'
+                    ),
+                    0
+                )
+                + coalesce(
+                    (
+                        SELECT sum(transaction.amount)
+                        FROM wallet_transactions AS transaction
+                        WHERE transaction.user_id = app_user.id
+                          AND transaction.transaction_type = 'booking_refund'
+                    ),
+                    0
+                )
+            )
+            WHERE EXISTS (
+                SELECT 1
+                FROM seed_passenger_data AS seed
+                WHERE seed.mobile = app_user.mobile
+            )
+        """,
+        BULK_INITIAL_CREDIT,
+    )
+
+    return await connection.fetchval(
+        """
+            SELECT count(*)
+            FROM bookings AS booking
+            JOIN profiles AS profile
+                ON profile.id = booking.passenger_profile_id
+            JOIN users AS app_user
+                ON app_user.id = profile.user_id
+            WHERE app_user.mobile LIKE '098%'
+              AND booking.status = 'confirmed'
+        """
+    )
+
+
+async def seed_development_data(booking_count: int = 100_000) -> None:
     connection = await asyncpg.connect(dsn=settings.database_url)
 
     try:
@@ -272,9 +701,16 @@ async def seed_development_data() -> None:
                     ticket_price,
                 )
 
+            generated_booking_count = await seed_bulk_bookings(
+                connection=connection,
+                hashed_password=hashed_password,
+                booking_count=booking_count,
+            )
+
         print("Development data seeded.")
         print("User mobile: 09123456789")
         print(f"Development password: {DEV_PASSWORD}")
+        print(f"Bulk confirmed bookings available: {generated_booking_count}")
 
     finally:
         await connection.close()
