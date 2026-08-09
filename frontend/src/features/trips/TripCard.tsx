@@ -1,4 +1,4 @@
-import { ArrowLeft, BusFront, Clock3, MapPin, UsersRound } from "lucide-react";
+import { ArrowLeft, BusFront, Clock3, UsersRound } from "lucide-react";
 
 import {
   formatDate,
@@ -8,6 +8,7 @@ import {
   formatTime,
 } from "../../lib/format";
 import type { Ticket } from "../../types/api";
+import { IranRouteMap } from "./IranRouteMap";
 
 interface TripCardProps {
   trip: Ticket;
@@ -34,11 +35,7 @@ export function TripCard({ trip, onSelect }: TripCardProps) {
           </span>
           <strong>{trip.origin}</strong>
         </div>
-        <div className="trip-card__route-line" aria-hidden="true">
-          <span />
-          <span className="trip-card__route-track" />
-          <MapPin size={18} />
-        </div>
+        <IranRouteMap origin={trip.origin} destination={trip.destination} />
         <div className="trip-card__stop trip-card__stop--destination">
           <span className="trip-card__time" dir="ltr">
             {formatTime(trip.arrival_time)}
@@ -50,7 +47,10 @@ export function TripCard({ trip, onSelect }: TripCardProps) {
       <div className="trip-card__meta">
         <span>
           <Clock3 size={17} aria-hidden="true" />
-          {formatDuration(trip.departure_time, trip.arrival_time)}
+          <span>
+            <strong className="trip-card__meta-label">مدت سفر:</strong>{" "}
+            {formatDuration(trip.departure_time, trip.arrival_time)}
+          </span>
         </span>
         <span>
           <BusFront size={17} aria-hidden="true" />

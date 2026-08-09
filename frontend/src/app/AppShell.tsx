@@ -12,6 +12,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { useTheme } from "./ThemeContext";
 import { BrandMark } from "../components/BrandMark";
+import { formatPrice } from "../lib/format";
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
   `app-nav__link${isActive ? " app-nav__link--active" : ""}`;
@@ -56,9 +57,32 @@ export function AppShell() {
             >
               {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
             </button>
-            <NavLink className="account-link" to={user ? "/account" : "/login"}>
-              {user ? <UserRound size={19} /> : <LogIn size={19} />}
-              <span>{user ? user.display_name : "ورود"}</span>
+            <NavLink
+              className={`account-link${user ? " account-link--authenticated" : ""}`}
+              to={user ? "/account" : "/login"}
+              aria-label={
+                user
+                  ? `حساب کاربری؛ موجودی ${formatPrice(user.wallet_balance)}`
+                  : "ورود به حساب کاربری"
+              }
+            >
+              {user ? (
+                <UserRound size={19} aria-hidden="true" />
+              ) : (
+                <LogIn size={19} aria-hidden="true" />
+              )}
+              {user ? (
+                <span className="account-link__details">
+                  <span className="account-link__name">
+                    {user.display_name}
+                  </span>
+                  <span className="account-link__balance">
+                    موجودی {formatPrice(user.wallet_balance)}
+                  </span>
+                </span>
+              ) : (
+                <span className="account-link__login">ورود</span>
+              )}
             </NavLink>
           </div>
         </div>

@@ -66,6 +66,14 @@ export default function TripsPage() {
     ],
     [routes, origin],
   );
+  const canSwap = useMemo(
+    () =>
+      Boolean(origin && destination) &&
+      routes.some(
+        (route) => route.origin === destination && route.destination === origin,
+      ),
+    [routes, origin, destination],
+  );
 
   const fetchTickets = async (nextSort = sort) => {
     setLoading(true);
@@ -144,9 +152,19 @@ export default function TripsPage() {
               ))}
             </select>
           </div>
-          <span className="trip-search__connector" aria-hidden="true">
-            <ArrowLeftRight size={20} />
-          </span>
+          <button
+            className="trip-search__connector"
+            type="button"
+            disabled={!canSwap}
+            aria-label="جابه‌جایی مبدأ و مقصد"
+            onClick={() => {
+              const previousOrigin = origin;
+              setOrigin(destination);
+              setDestination(previousOrigin);
+            }}
+          >
+            <ArrowLeftRight size={20} aria-hidden="true" />
+          </button>
           <div className="trip-search__field">
             <label htmlFor="destination">مقصد</label>
             <select

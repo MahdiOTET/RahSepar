@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Armchair, Check, X } from "lucide-react";
+import { Armchair, Check, DoorOpen, X } from "lucide-react";
 
 import { api } from "../../lib/api";
 import { formatNumber, formatPrice, toPersianError } from "../../lib/format";
@@ -131,9 +131,15 @@ export function SeatPicker({ trip, onClose, onBooked }: SeatPickerProps) {
               role="group"
               aria-label="صندلی‌های اتوبوس"
             >
-              <span className="seat-map__driver" aria-hidden="true">
-                <Armchair size={19} /> راننده
-              </span>
+              <div className="seat-map__front">
+                <span className="seat-map__driver">
+                  <Armchair size={18} aria-hidden="true" /> راننده
+                </span>
+                <span className="seat-map__front-label">جلوی اتوبوس</span>
+                <span className="seat-map__door">
+                  <DoorOpen size={17} aria-hidden="true" /> درب
+                </span>
+              </div>
               <div className="seat-map__grid">
                 {Array.from(
                   { length: seatMap.capacity },
