@@ -884,41 +884,6 @@ h2 {
   border-block-start: 2px dashed
     color-mix(in srgb, var(--color-teal) 40%, var(--color-border));
 }
-.iran-route-map {
-  width: min(100%, 115px);
-  margin-inline: auto;
-}
-.iran-route-map svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  overflow: visible;
-}
-.iran-route-map__country {
-  fill: var(--color-surface-soft);
-  stroke: var(--color-border-strong);
-  stroke-linejoin: round;
-  stroke-width: 1.4;
-}
-.iran-route-map__path {
-  fill: none;
-  stroke: var(--color-teal);
-  stroke-dasharray: 4 3;
-  stroke-linecap: round;
-  stroke-width: 1.8;
-}
-.iran-route-map__arrow,
-.iran-route-map__destination {
-  fill: var(--color-teal);
-}
-.iran-route-map__origin-ring {
-  fill: var(--color-surface);
-  stroke: var(--color-saffron);
-  stroke-width: 1.6;
-}
-.iran-route-map__origin {
-  fill: var(--color-saffron);
-}
 .trip-card__meta {
   display: flex;
   flex-wrap: wrap;
