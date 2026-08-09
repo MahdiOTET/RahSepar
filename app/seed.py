@@ -11,9 +11,25 @@ BULK_BOOKING_PRICE = Decimal("1000000.00")
 BULK_INITIAL_CREDIT = Decimal("50000000.00")
 BULK_BUS_COUNT = 20
 BULK_DRIVER_COUNT = 20
-BULK_ROUTE_COUNT = 5
 BULK_BUS_CAPACITY = 100
 BULK_DAILY_BOOKING_LIMIT = 20
+
+BULK_ROUTES = (
+    ("تهران", "مشهد"),
+    ("مشهد", "تهران"),
+    ("شیراز", "تهران"),
+    ("تهران", "اصفهان"),
+    ("اصفهان", "تهران"),
+)
+
+DEMO_ROUTES = (
+    ("تهران", "شیراز", "Volvo B9R", Decimal("950000.00"), 10),
+    ("تهران", "مشهد", "Scania Maral", Decimal("1250000.00"), 12),
+    ("مشهد", "تهران", "Volvo B11R", Decimal("1200000.00"), 12),
+    ("شیراز", "تهران", "Scania Classic", Decimal("900000.00"), 10),
+    ("تهران", "اصفهان", "MAN Lion's Coach", Decimal("720000.00"), 6),
+    ("اصفهان", "تهران", "Volvo B9R", Decimal("680000.00"), 6),
+)
 
 
 async def upsert_user(
@@ -92,14 +108,14 @@ async def seed_bulk_bookings(
             await upsert_profile(
                 connection=connection,
                 user_id=driver_user_id,
-                display_name=f"Load Driver {number}",
+                display_name=f"راننده آزمایشی {number}",
                 profile_type="driver",
             )
         )
 
     route_ids: list[int] = []
 
-    for number in range(1, BULK_ROUTE_COUNT + 1):
+    for origin, destination in BULK_ROUTES:
         route_ids.append(
             await connection.fetchval(
                 """
@@ -109,8 +125,8 @@ async def seed_bulk_bookings(
                     DO UPDATE SET origin = EXCLUDED.origin
                     RETURNING id
                 """,
-                f"Load Origin {number}",
-                f"Load Destination {number}",
+                origin,
+                destination,
             )
         )
 
@@ -137,7 +153,7 @@ async def seed_bulk_bookings(
                 """,
                 route_ids[(number - 1) % len(route_ids)],
                 f"LOAD-{number:03d}",
-                "Load Test Bus",
+                "اتوبوس داده آزمایشی",
                 BULK_BUS_CAPACITY,
             )
         )
@@ -159,8 +175,7 @@ async def seed_bulk_bookings(
             number,
             f"098{number:08d}",
             f"Load Passenger {number}",
-            booking_anchor
-            + timedelta(days=(number - 1) % 30, hours=(number - 1) % 24),
+            booking_anchor + timedelta(days=(number - 1) % 30, hours=(number - 1) % 24),
         )
         for number in range(1, passenger_count + 1)
     ]
@@ -483,6 +498,141 @@ async def seed_bulk_bookings(
     )
 
 
+async def seed_available_demo_trips(connection: asyncpg.Connection) -> int:
+    driver_rows = await connection.fetch(
+        """
+            SELECT profile.id
+            FROM profiles AS profile
+            JOIN users AS app_user
+                ON app_user.id = profile.user_id
+            WHERE profile.profile_type = 'driver'
+              AND app_user.is_active = TRUE
+            ORDER BY profile.id
+            LIMIT $1
+        """,
+        len(DEMO_ROUTES),
+    )
+
+    if len(driver_rows) < len(DEMO_ROUTES):
+        raise RuntimeError("Not enough active drivers to seed available trips")
+
+    seeded_trip_count = 0
+    demo_anchor = datetime.now(UTC).replace(
+        hour=5,
+        minute=30,
+        second=0,
+        microsecond=0,
+    )
+
+    for route_index, (
+        origin,
+        destination,
+        model,
+        base_price,
+        duration_hours,
+    ) in enumerate(DEMO_ROUTES):
+        route_id = await connection.fetchval(
+            """
+                INSERT INTO routes (origin, destination)
+                VALUES ($1, $2)
+                ON CONFLICT (origin, destination)
+                DO UPDATE SET origin = EXCLUDED.origin
+                RETURNING id
+            """,
+            origin,
+            destination,
+        )
+        bus_id = await connection.fetchval(
+            """
+                INSERT INTO buses (
+                    route_id,
+                    plate_number,
+                    model,
+                    capacity
+                )
+                VALUES ($1, $2, $3, 40)
+                ON CONFLICT (plate_number)
+                DO UPDATE SET
+                    route_id = EXCLUDED.route_id,
+                    model = EXCLUDED.model,
+                    capacity = EXCLUDED.capacity,
+                    is_active = TRUE
+                RETURNING id
+            """,
+            route_id,
+            f"RSP-{route_index + 1:03d}",
+            model,
+        )
+        reusable_trip_ids = [
+            row["id"]
+            for row in await connection.fetch(
+                """
+                    SELECT trip.id
+                    FROM trips AS trip
+                    WHERE trip.bus_id = $1
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM bookings AS booking
+                          WHERE booking.trip_id = trip.id
+                      )
+                    ORDER BY trip.id
+                    LIMIT 3
+                """,
+                bus_id,
+            )
+        ]
+
+        for slot in range(3):
+            departure_time = demo_anchor + timedelta(
+                days=2 + slot * 2,
+                minutes=route_index * 20,
+            )
+            arrival_time = departure_time + timedelta(hours=duration_hours)
+            price = base_price + Decimal(slot * 125_000)
+            driver_profile_id = driver_rows[route_index]["id"]
+
+            if slot < len(reusable_trip_ids):
+                await connection.execute(
+                    """
+                        UPDATE trips
+                        SET
+                            driver_profile_id = $2,
+                            departure_time = $3,
+                            arrival_time = $4,
+                            price = $5,
+                            status = 'scheduled'
+                        WHERE id = $1
+                    """,
+                    reusable_trip_ids[slot],
+                    driver_profile_id,
+                    departure_time,
+                    arrival_time,
+                    price,
+                )
+            else:
+                await connection.execute(
+                    """
+                        INSERT INTO trips (
+                            bus_id,
+                            driver_profile_id,
+                            departure_time,
+                            arrival_time,
+                            price
+                        )
+                        VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    bus_id,
+                    driver_profile_id,
+                    departure_time,
+                    arrival_time,
+                    price,
+                )
+
+            seeded_trip_count += 1
+
+    return seeded_trip_count
+
+
 async def seed_development_data(booking_count: int = 100_000) -> None:
     connection = await asyncpg.connect(dsn=settings.database_url)
 
@@ -500,14 +650,14 @@ async def seed_development_data(booking_count: int = 100_000) -> None:
             passenger_profile_id = await upsert_profile(
                 connection,
                 user_id,
-                "Development Passenger",
+                "مسافر آزمایشی",
                 "passenger",
             )
 
             await upsert_profile(
                 connection,
                 user_id,
-                "Development Operator",
+                "مدیر آزمایشی",
                 "operator",
             )
 
@@ -521,17 +671,19 @@ async def seed_development_data(booking_count: int = 100_000) -> None:
             driver_profile_id = await upsert_profile(
                 connection,
                 driver_user_id,
-                "Development Driver",
+                "راننده آزمایشی اصلی",
                 "driver",
             )
 
-            route_id = await connection.fetchval("""
+            route_id = await connection.fetchval(
+                """
                 INSERT INTO routes (origin, destination)
-                VALUES ('Tehran', 'Shiraz')
+                VALUES ('تهران', 'شیراز')
                 ON CONFLICT (origin, destination)
                 DO UPDATE SET origin = EXCLUDED.origin
                 RETURNING id
-                """)
+                """
+            )
 
             bus_id = await connection.fetchval(
                 """
@@ -706,11 +858,13 @@ async def seed_development_data(booking_count: int = 100_000) -> None:
                 hashed_password=hashed_password,
                 booking_count=booking_count,
             )
+            available_trip_count = await seed_available_demo_trips(connection)
 
         print("Development data seeded.")
         print("User mobile: 09123456789")
         print(f"Development password: {DEV_PASSWORD}")
         print(f"Bulk confirmed bookings available: {generated_booking_count}")
+        print(f"Available demo trips: {available_trip_count}")
 
     finally:
         await connection.close()

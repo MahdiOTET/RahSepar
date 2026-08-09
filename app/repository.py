@@ -1,6 +1,7 @@
-import asyncpg
 from datetime import date, datetime
 from decimal import Decimal
+
+import asyncpg
 
 
 async def get_user_by_mobile(pool: asyncpg.Pool, mobile: str) -> asyncpg.Record | None:
@@ -27,6 +28,19 @@ async def get_user_with_profiles(
                 u.id,
                 u.mobile,
                 u.is_active,
+                u.wallet_balance,
+                COALESCE(
+                    max(p.display_name) FILTER (
+                        WHERE p.profile_type = 'passenger'
+                    ),
+                    max(p.display_name) FILTER (
+                        WHERE p.profile_type = 'operator'
+                    ),
+                    max(p.display_name) FILTER (
+                        WHERE p.profile_type = 'driver'
+                    ),
+                    u.mobile
+                ) AS display_name,
                 COALESCE(
                     array_agg(
                         p.profile_type
@@ -41,7 +55,8 @@ async def get_user_with_profiles(
             GROUP BY 
                 u.id,
                 u.mobile,
-                u.is_active
+                u.is_active,
+                u.wallet_balance
             """,
         user_id,
     )
@@ -116,6 +131,64 @@ async def get_available_tickets(
         sort,
         limit,
         offset,
+    )
+
+
+async def get_available_routes(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            SELECT
+                route.id,
+                route.origin,
+                route.destination
+            FROM routes AS route
+            WHERE EXISTS (
+                SELECT 1
+                FROM buses AS bus
+                JOIN trips AS trip
+                    ON trip.bus_id = bus.id
+                WHERE bus.route_id = route.id
+                  AND bus.is_active = TRUE
+                  AND trip.status = 'scheduled'
+                  AND trip.departure_time > NOW()
+                  AND (
+                      SELECT count(*)
+                      FROM bookings AS booking
+                      WHERE booking.trip_id = trip.id
+                        AND booking.status = 'confirmed'
+                  ) < bus.capacity
+            )
+            ORDER BY route.origin, route.destination, route.id
+        """
+    )
+
+
+async def get_trip_seat_map(
+    pool: asyncpg.Pool,
+    trip_id: int,
+) -> asyncpg.Record | None:
+    return await pool.fetchrow(
+        """
+            SELECT
+                trip.id AS trip_id,
+                bus.capacity,
+                COALESCE(
+                    array_agg(
+                        booking.seat_number
+                        ORDER BY booking.seat_number
+                    ) FILTER (WHERE booking.id IS NOT NULL),
+                    ARRAY[]::SMALLINT[]
+                ) AS unavailable_seats
+            FROM trips AS trip
+            JOIN buses AS bus
+                ON bus.id = trip.bus_id
+            LEFT JOIN bookings AS booking
+                ON booking.trip_id = trip.id
+               AND booking.status = 'confirmed'
+            WHERE trip.id = $1
+            GROUP BY trip.id, bus.capacity
+        """,
+        trip_id,
     )
 
 
@@ -298,6 +371,42 @@ async def get_booking_for_cancellation(
     )
 
 
+async def get_user_bookings(
+    pool: asyncpg.Pool,
+    user_id: int,
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            SELECT
+                booking.id,
+                booking.trip_id,
+                route.origin,
+                route.destination,
+                trip.departure_time,
+                trip.arrival_time,
+                booking.seat_number,
+                booking.paid_price,
+                booking.status,
+                booking.booked_at,
+                booking.cancelled_at,
+                bus.model AS bus_model
+            FROM bookings AS booking
+            JOIN profiles AS passenger
+                ON passenger.id = booking.passenger_profile_id
+               AND passenger.profile_type = 'passenger'
+            JOIN trips AS trip
+                ON trip.id = booking.trip_id
+            JOIN buses AS bus
+                ON bus.id = trip.bus_id
+            JOIN routes AS route
+                ON route.id = bus.route_id
+            WHERE passenger.user_id = $1
+            ORDER BY booking.booked_at DESC, booking.id DESC
+        """,
+        user_id,
+    )
+
+
 async def mark_booking_cancelled(
     connection: asyncpg.Connection,
     booking_id: int,
@@ -428,6 +537,101 @@ async def upsert_bus(
         plate_number,
         model,
         capacity,
+    )
+
+
+async def get_buses(
+    pool: asyncpg.Pool,
+    limit: int,
+    offset: int,
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            SELECT
+                bus.id,
+                route.origin,
+                route.destination,
+                bus.plate_number,
+                bus.model,
+                bus.capacity,
+                bus.is_active
+            FROM buses AS bus
+            JOIN routes AS route
+                ON route.id = bus.route_id
+            ORDER BY bus.id DESC
+            LIMIT $1
+            OFFSET $2
+        """,
+        limit,
+        offset,
+    )
+
+
+async def get_drivers(pool: asyncpg.Pool) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            SELECT
+                profile.id,
+                profile.display_name,
+                app_user.mobile,
+                app_user.is_active
+            FROM profiles AS profile
+            JOIN users AS app_user
+                ON app_user.id = profile.user_id
+            WHERE profile.profile_type = 'driver'
+            ORDER BY profile.display_name, profile.id
+        """
+    )
+
+
+async def get_operator_trips(
+    pool: asyncpg.Pool,
+    limit: int,
+    offset: int,
+) -> list[asyncpg.Record]:
+    return await pool.fetch(
+        """
+            SELECT
+                trip.id,
+                trip.bus_id,
+                trip.driver_profile_id,
+                route.origin,
+                route.destination,
+                bus.plate_number,
+                bus.model AS bus_model,
+                driver.display_name AS driver_name,
+                trip.departure_time,
+                trip.arrival_time,
+                trip.price,
+                trip.status,
+                bus.capacity,
+                (
+                    bus.capacity - count(booking.id)
+                )::INTEGER AS available_seats
+            FROM trips AS trip
+            JOIN buses AS bus
+                ON bus.id = trip.bus_id
+            JOIN routes AS route
+                ON route.id = bus.route_id
+            JOIN profiles AS driver
+                ON driver.id = trip.driver_profile_id
+            LEFT JOIN bookings AS booking
+                ON booking.trip_id = trip.id
+               AND booking.status = 'confirmed'
+            GROUP BY
+                trip.id,
+                route.origin,
+                route.destination,
+                bus.plate_number,
+                bus.model,
+                driver.display_name,
+                bus.capacity
+            ORDER BY trip.departure_time DESC, trip.id DESC
+            LIMIT $1
+            OFFSET $2
+        """,
+        limit,
+        offset,
     )
 
 

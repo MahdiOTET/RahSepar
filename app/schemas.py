@@ -1,8 +1,9 @@
-from typing import Literal
-from pydantic import BaseModel, Field
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
@@ -23,6 +24,8 @@ class TokenResponse(BaseModel):
 class CurrentUserResponse(BaseModel):
     id: int
     mobile: str
+    display_name: str
+    wallet_balance: Decimal
     profiles: list[str]
 
 
@@ -41,6 +44,18 @@ class TicketResponse(BaseModel):
     bus_model: str | None
     capacity: int
     available_seats: int
+
+
+class RouteResponse(BaseModel):
+    id: int
+    origin: str
+    destination: str
+
+
+class TripSeatMapResponse(BaseModel):
+    trip_id: int
+    capacity: int
+    unavailable_seats: list[int]
 
 
 class BookingCreateRequest(BaseModel):
@@ -64,6 +79,21 @@ class BookingCancellationResponse(BaseModel):
     cancelled_at: datetime
     refunded_amount: Decimal
     remaining_wallet_balance: Decimal
+
+
+class BookingListItemResponse(BaseModel):
+    id: int
+    trip_id: int
+    origin: str
+    destination: str
+    departure_time: datetime
+    arrival_time: datetime
+    seat_number: int
+    paid_price: Decimal
+    status: Literal["confirmed", "cancelled"]
+    booked_at: datetime
+    cancelled_at: datetime | None
+    bus_model: str | None
 
 
 class BusImportItem(BaseModel):
@@ -93,6 +123,13 @@ class BusImportResponse(BaseModel):
     buses: list[BusResponse]
 
 
+class DriverResponse(BaseModel):
+    id: int
+    display_name: str
+    mobile: str
+    is_active: bool
+
+
 class TripCreateRequest(BaseModel):
     bus_id: int = Field(gt=0)
     driver_profile_id: int = Field(gt=0)
@@ -114,6 +151,23 @@ class TripResponse(BaseModel):
     arrival_time: datetime
     price: Decimal
     status: Literal["scheduled"]
+
+
+class OperatorTripResponse(BaseModel):
+    id: int
+    bus_id: int
+    driver_profile_id: int
+    origin: str
+    destination: str
+    plate_number: str
+    bus_model: str | None
+    driver_name: str
+    departure_time: datetime
+    arrival_time: datetime
+    price: Decimal
+    status: Literal["scheduled", "cancelled", "completed"]
+    capacity: int
+    available_seats: int
 
 
 class HourlyBookingReportRow(BaseModel):

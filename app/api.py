@@ -1,48 +1,62 @@
-import asyncpg
 from datetime import date
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+
+import asyncpg
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from app.db import get_pool
 from app.schemas import (
-    LoginRequest,
-    TokenResponse,
-    CurrentUserResponse,
-    TicketResponse,
-    TicketSort,
-    BookingCreateRequest,
-    BookingResponse,
     BookingCancellationResponse,
+    BookingCreateRequest,
+    BookingListItemResponse,
+    BookingResponse,
+    BusiestDriversReportResponse,
     BusImportRequest,
     BusImportResponse,
+    BusResponse,
+    CurrentUserResponse,
+    DriverResponse,
+    HourlyBookingReportResponse,
+    LoginRequest,
+    MonthlyBusReportResponse,
+    OperatorTripResponse,
+    RouteResponse,
+    TicketResponse,
+    TicketSort,
+    TokenResponse,
     TripCreateRequest,
     TripResponse,
-    HourlyBookingReportResponse,
-    MonthlyBusReportResponse,
-    BusiestDriversReportResponse,
+    TripSeatMapResponse,
 )
 from app.service import (
-    InvalidCredentialError,
-    InvalidAccessTokenError,
+    BookingConflictError,
     BookingForbiddenError,
     BookingNotFoundError,
     BookingValidationError,
-    BookingConflictError,
     BusImportValidationError,
-    list_available_tickets,
-    authenticate_user,
-    resolve_access_token,
-    create_booking,
-    cancel_booking,
-    import_buses,
+    InvalidAccessTokenError,
+    InvalidCredentialError,
+    ReportValidationError,
+    TripConflictError,
     TripNotFoundError,
     TripValidationError,
-    TripConflictError,
-    create_trip,
-    ReportValidationError,
+    authenticate_user,
+    build_busiest_drivers_report,
     build_hourly_booking_report,
     build_monthly_bus_report,
-    build_busiest_drivers_report,
+    cancel_booking,
+    create_booking,
+    create_trip,
+    get_trip_seats,
+    import_buses,
+    list_available_routes,
+    list_available_tickets,
+    list_drivers,
+    list_operator_buses,
+    list_operator_trips,
+    list_user_bookings,
+    resolve_access_token,
 )
 
 router = APIRouter()
@@ -91,7 +105,11 @@ async def get_current_user(
         ) from err
 
     return CurrentUserResponse(
-        id=user["id"], mobile=user["mobile"], profiles=list(user["profiles"])
+        id=user["id"],
+        mobile=user["mobile"],
+        display_name=user["display_name"],
+        wallet_balance=user["wallet_balance"],
+        profiles=list(user["profiles"]),
     )
 
 
@@ -119,6 +137,35 @@ async def list_tickets(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/routes", response_model=list[RouteResponse])
+async def list_routes(
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> list[RouteResponse]:
+    return await list_available_routes(pool)
+
+
+@router.get("/trips/{trip_id}/seats", response_model=TripSeatMapResponse)
+async def trip_seats(
+    trip_id: Annotated[int, Path(gt=0)],
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+) -> TripSeatMapResponse:
+    try:
+        return await get_trip_seats(pool, trip_id)
+    except TripNotFoundError as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
+        ) from err
+
+
+@router.get("/bookings", response_model=list[BookingListItemResponse])
+async def list_my_bookings(
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    user: Annotated[CurrentUserResponse, Depends(get_current_user)],
+) -> list[BookingListItemResponse]:
+    return await list_user_bookings(pool, user.id)
 
 
 @router.post(
@@ -191,6 +238,34 @@ async def require_operator(
         )
 
     return user
+
+
+@router.get("/buses", response_model=list[BusResponse])
+async def list_buses(
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    operator: Annotated[CurrentUserResponse, Depends(require_operator)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[BusResponse]:
+    return await list_operator_buses(pool, limit, offset)
+
+
+@router.get("/drivers", response_model=list[DriverResponse])
+async def list_driver_profiles(
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    operator: Annotated[CurrentUserResponse, Depends(require_operator)],
+) -> list[DriverResponse]:
+    return await list_drivers(pool)
+
+
+@router.get("/trips", response_model=list[OperatorTripResponse])
+async def list_scheduled_trips(
+    pool: Annotated[asyncpg.Pool, Depends(get_pool)],
+    operator: Annotated[CurrentUserResponse, Depends(require_operator)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[OperatorTripResponse]:
+    return await list_operator_trips(pool, limit, offset)
 
 
 @router.post(

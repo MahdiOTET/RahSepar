@@ -1,5 +1,4 @@
-from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 import httpx
@@ -14,6 +13,8 @@ async def test_login_current_user_and_invalid_credentials(
 
     assert current_user.status_code == 200
     assert current_user.json()["mobile"] == "09100000001"
+    assert current_user.json()["display_name"] == "Test Operator Passenger"
+    assert current_user.json()["wallet_balance"] == "10000000.00"
     assert current_user.json()["profiles"] == ["operator", "passenger"]
 
     invalid_login = await api_client.post(
@@ -24,6 +25,77 @@ async def test_login_current_user_and_invalid_credentials(
 
     missing_token = await api_client.get("/api/v1/users/me")
     assert missing_token.status_code == 401
+
+
+async def test_gui_catalog_seats_and_personal_bookings(
+    api_client: httpx.AsyncClient,
+    seeded_data: dict,
+    login_headers,
+) -> None:
+    owner_headers = await login_headers("09100000001")
+    other_headers = await login_headers("09100000002")
+
+    routes = await api_client.get("/api/v1/routes")
+    assert routes.status_code == 200
+    assert routes.json() == [
+        {
+            "id": 1,
+            "origin": "Tehran",
+            "destination": "Tabriz",
+        }
+    ]
+
+    seats_before = await api_client.get(f"/api/v1/trips/{seeded_data['trip_id']}/seats")
+    assert seats_before.status_code == 200
+    assert seats_before.json()["capacity"] == 40
+    assert seats_before.json()["unavailable_seats"] == []
+
+    booking = await api_client.post(
+        "/api/v1/bookings",
+        headers=owner_headers,
+        json={"trip_id": seeded_data["trip_id"], "seat_number": 3},
+    )
+    assert booking.status_code == 201
+
+    seats_after = await api_client.get(f"/api/v1/trips/{seeded_data['trip_id']}/seats")
+    assert seats_after.json()["unavailable_seats"] == [3]
+
+    owner_bookings = await api_client.get(
+        "/api/v1/bookings",
+        headers=owner_headers,
+    )
+    other_bookings = await api_client.get(
+        "/api/v1/bookings",
+        headers=other_headers,
+    )
+    assert owner_bookings.status_code == 200
+    assert owner_bookings.json()[0]["id"] == booking.json()["id"]
+    assert owner_bookings.json()[0]["origin"] == "Tehran"
+    assert other_bookings.json() == []
+
+
+async def test_operator_read_collections(
+    api_client: httpx.AsyncClient,
+    seeded_data: dict,
+    login_headers,
+) -> None:
+    operator_headers = await login_headers("09100000001")
+    passenger_headers = await login_headers("09100000002")
+
+    buses = await api_client.get("/api/v1/buses", headers=operator_headers)
+    drivers = await api_client.get("/api/v1/drivers", headers=operator_headers)
+    trips = await api_client.get("/api/v1/trips", headers=operator_headers)
+
+    assert buses.status_code == 200
+    assert buses.json()[0]["id"] == seeded_data["bus_id"]
+    assert drivers.status_code == 200
+    assert drivers.json()[0]["id"] == seeded_data["driver_profile_id"]
+    assert trips.status_code == 200
+    assert trips.json()[0]["id"] == seeded_data["trip_id"]
+    assert trips.json()[0]["available_seats"] == 40
+
+    forbidden = await api_client.get("/api/v1/buses", headers=passenger_headers)
+    assert forbidden.status_code == 403
 
 
 async def test_ticket_booking_and_daily_limit(
@@ -257,9 +329,7 @@ async def test_operator_reports(
     )
     assert monthly.status_code == 200
     bus_row = next(
-        row
-        for row in monthly.json()["buses"]
-        if row["bus_id"] == seeded_data["bus_id"]
+        row for row in monthly.json()["buses"] if row["bus_id"] == seeded_data["bus_id"]
     )
     assert bus_row["trip_count"] == 1
     assert bus_row["confirmed_bookings"] == 1
@@ -270,9 +340,10 @@ async def test_operator_reports(
         params={"date_from": "2030-01-01", "date_to": "2030-01-31"},
     )
     assert busiest.status_code == 200
-    assert busiest.json()["drivers"][0]["driver_profile_id"] == seeded_data[
-        "driver_profile_id"
-    ]
+    assert (
+        busiest.json()["drivers"][0]["driver_profile_id"]
+        == seeded_data["driver_profile_id"]
+    )
 
     forbidden = await api_client.get(
         "/api/v1/reports/monthly-buses",

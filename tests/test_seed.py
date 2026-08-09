@@ -1,6 +1,6 @@
 import asyncpg
 
-from app.seed import seed_bulk_bookings
+from app.seed import seed_available_demo_trips, seed_bulk_bookings
 
 
 async def test_bulk_seeder_is_valid_and_repeatable(
@@ -22,6 +22,10 @@ async def test_bulk_seeder_is_valid_and_repeatable(
                 hashed_password=test_password_hash,
                 booking_count=250,
             )
+
+        async with connection.transaction():
+            first_demo_count = await seed_available_demo_trips(connection)
+            second_demo_count = await seed_available_demo_trips(connection)
 
         invariants = await connection.fetchrow(
             """
@@ -64,9 +68,30 @@ async def test_bulk_seeder_is_valid_and_repeatable(
                     ) AS negative_wallets
             """
         )
+        demo_catalog = await connection.fetchrow(
+            """
+                SELECT
+                    count(DISTINCT route.id) AS route_count,
+                    count(DISTINCT trip.id) AS trip_count,
+                    count(DISTINCT trip.price) AS price_count
+                FROM buses AS bus
+                JOIN routes AS route
+                    ON route.id = bus.route_id
+                JOIN trips AS trip
+                    ON trip.bus_id = bus.id
+                WHERE bus.plate_number LIKE 'RSP-%'
+                  AND trip.status = 'scheduled'
+                  AND trip.departure_time > NOW()
+            """
+        )
 
     assert first_count == 250
     assert second_count == 250
+    assert first_demo_count == 18
+    assert second_demo_count == 18
     assert invariants["max_daily"] <= 20
     assert invariants["payments"] == 250
     assert invariants["negative_wallets"] == 0
+    assert demo_catalog["route_count"] == 6
+    assert demo_catalog["trip_count"] == 18
+    assert demo_catalog["price_count"] > 3
