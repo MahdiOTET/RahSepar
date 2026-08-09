@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, BusFront, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -16,9 +16,15 @@ import {
 import { formatNumber, toPersianError } from "../../lib/format";
 import type { BookingResult, RouteOption, Ticket } from "../../types/api";
 import { SeatPicker } from "./SeatPicker";
-import { TripCard } from "./TripCard";
+import { TripList } from "./TripList";
 
-type SortOrder = "price_asc" | "price_desc";
+type SortOrder =
+  "price_asc" | "price_desc" | "departure_asc" | "departure_desc";
+
+interface FetchTicketOptions {
+  animate?: boolean;
+  scrollToResults?: boolean;
+}
 
 export default function TripsPage() {
   const navigate = useNavigate();
@@ -33,6 +39,9 @@ export default function TripsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
+  const [resultRevision, setResultRevision] = useState(0);
+  const [pendingResultScroll, setPendingResultScroll] = useState(false);
+  const resultsHeadingRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -52,6 +61,32 @@ export default function TripsPage() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (loading || !pendingResultScroll) return;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      const resultsHeading = resultsHeadingRef.current;
+      if (resultsHeading) {
+        const bounds = resultsHeading.getBoundingClientRect();
+        const headingIsVisible =
+          bounds.bottom > 0 && bounds.top < window.innerHeight;
+
+        if (!headingIsVisible) {
+          const reducedMotion = window.matchMedia(
+            "(prefers-reduced-motion: reduce)",
+          ).matches;
+          resultsHeading.scrollIntoView({
+            behavior: reducedMotion ? "auto" : "smooth",
+            block: "start",
+          });
+        }
+      }
+      setPendingResultScroll(false);
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [loading, pendingResultScroll]);
 
   const origins = useMemo(
     () => [...new Set(routes.map((route) => route.origin))],
@@ -76,7 +111,10 @@ export default function TripsPage() {
     [routes, origin, destination],
   );
 
-  const fetchTickets = async (nextSort = sort) => {
+  const fetchTickets = async (
+    nextSort = sort,
+    options: FetchTicketOptions = {},
+  ) => {
     setLoading(true);
     setError("");
     try {
@@ -85,6 +123,12 @@ export default function TripsPage() {
       );
       setTickets(result);
       setSearched(Boolean(origin || destination));
+      if (options.animate !== false) {
+        setResultRevision((current) => current + 1);
+      }
+      if (options.scrollToResults) {
+        setPendingResultScroll(true);
+      }
     } catch (reason) {
       setError(toPersianError(reason));
     } finally {
@@ -106,7 +150,7 @@ export default function TripsPage() {
       `رزرو شماره ${formatNumber(booking.id)} با موفقیت ثبت شد و مبلغ آن از کیف پول پرداخت شد.`,
     );
     invalidateInitialTickets();
-    await Promise.all([fetchTickets(), refreshUser()]);
+    await Promise.all([fetchTickets(sort, { animate: false }), refreshUser()]);
   };
 
   return (
@@ -125,7 +169,10 @@ export default function TripsPage() {
           className="trip-search"
           onSubmit={(event) => {
             event.preventDefault();
-            void fetchTickets();
+            void fetchTickets(sort, {
+              animate: true,
+              scrollToResults: true,
+            });
           }}
         >
           <div className="trip-search__field">
@@ -186,17 +233,25 @@ export default function TripsPage() {
           <button
             className="button button--accent trip-search__submit"
             type="submit"
+            disabled={loading}
           >
             <Search size={20} aria-hidden="true" />
-            جست‌وجوی سفر
+            {loading ? "در حال جست‌وجو…" : "جست‌وجوی سفر"}
           </button>
         </form>
       </section>
 
       {error && <StatusMessage type="error">{error}</StatusMessage>}
 
-      <section className="trip-results" aria-labelledby="trip-results-title">
-        <div className="section-heading">
+      <section
+        className="trip-results"
+        aria-labelledby="trip-results-title"
+        aria-busy={loading}
+      >
+        <div
+          className="section-heading trip-results__heading"
+          ref={resultsHeadingRef}
+        >
           <div>
             <span className="eyebrow">
               {searched ? "نتیجه جست‌وجو" : "پیشنهادهای آماده"}
@@ -204,40 +259,40 @@ export default function TripsPage() {
             <h2 id="trip-results-title">
               {searched ? `${origin} به ${destination}` : "سفرهای پیش رو"}
             </h2>
-            {!loading && <p>{formatNumber(tickets.length)} سفر در دسترس</p>}
+            {!loading && (
+              <p aria-live="polite" aria-atomic="true">
+                {formatNumber(tickets.length)} سفر در دسترس
+              </p>
+            )}
           </div>
-          <div className="segmented-control" aria-label="مرتب‌سازی قیمت">
-            <button
-              type="button"
-              aria-pressed={sort === "price_asc"}
-              onClick={() => {
-                setSort("price_asc");
-                void fetchTickets("price_asc");
+          <div className="sort-control">
+            <label htmlFor="trip-sort">مرتب‌سازی سفرها</label>
+            <select
+              id="trip-sort"
+              value={sort}
+              disabled={loading}
+              onChange={(event) => {
+                const nextSort = event.target.value as SortOrder;
+                setSort(nextSort);
+                void fetchTickets(nextSort, { animate: true });
               }}
             >
-              ارزان‌ترین
-            </button>
-            <button
-              type="button"
-              aria-pressed={sort === "price_desc"}
-              onClick={() => {
-                setSort("price_desc");
-                void fetchTickets("price_desc");
-              }}
-            >
-              گران‌ترین
-            </button>
+              <option value="price_asc">ارزان‌ترین</option>
+              <option value="price_desc">گران‌ترین</option>
+              <option value="departure_asc">زودترین حرکت</option>
+              <option value="departure_desc">دیرترین حرکت</option>
+            </select>
           </div>
         </div>
 
         {loading ? (
           <LoadingState label="در حال یافتن سفرها…" />
         ) : tickets.length > 0 ? (
-          <div className="trip-list">
-            {tickets.map((trip) => (
-              <TripCard key={trip.trip_id} trip={trip} onSelect={selectTrip} />
-            ))}
-          </div>
+          <TripList
+            key={resultRevision}
+            tickets={tickets}
+            onSelect={selectTrip}
+          />
         ) : (
           <EmptyState
             icon={BusFront}

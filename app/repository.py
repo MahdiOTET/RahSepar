@@ -121,7 +121,18 @@ async def get_available_tickets(
                         WHEN $3::TEXT = 'price_desc'
                         THEN t.price
                     END DESC,
-                    t.departure_time ASC,
+                    CASE
+                        WHEN $3::TEXT = 'departure_asc'
+                        THEN t.departure_time
+                    END ASC,
+                    CASE
+                        WHEN $3::TEXT = 'departure_desc'
+                        THEN t.departure_time
+                    END DESC,
+                    CASE
+                        WHEN $3::TEXT IN ('price_asc', 'price_desc')
+                        THEN t.departure_time
+                    END ASC,
                     t.id ASC
                 LIMIT $4
                 OFFSET $5                 

@@ -32,6 +32,8 @@ class CurrentUserResponse(BaseModel):
 class TicketSort(str, Enum):
     PRICE_ASC = "price_asc"
     PRICE_DESC = "price_desc"
+    DEPARTURE_ASC = "departure_asc"
+    DEPARTURE_DESC = "departure_desc"
 
 
 class TicketResponse(BaseModel):

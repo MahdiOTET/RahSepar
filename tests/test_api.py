@@ -74,6 +74,87 @@ async def test_gui_catalog_seats_and_personal_bookings(
     assert other_bookings.json() == []
 
 
+async def test_ticket_sorting_options_are_deterministic(
+    api_client: httpx.AsyncClient,
+    test_pool: asyncpg.Pool,
+    seeded_data: dict,
+) -> None:
+    departure_anchor = datetime.now(UTC) + timedelta(days=7)
+
+    async with test_pool.acquire() as connection:
+        route_id = await connection.fetchval(
+            """
+                INSERT INTO routes (origin, destination)
+                VALUES ('Sort Origin', 'Sort Destination')
+                RETURNING id
+            """
+        )
+        bus_id = await connection.fetchval(
+            """
+                INSERT INTO buses (route_id, plate_number, model, capacity)
+                VALUES ($1, 'SORT-001', 'Sort Coach', 40)
+                RETURNING id
+            """,
+            route_id,
+        )
+
+        trip_ids = []
+        for departure_offset, price in ((0, 300), (1, 100), (2, 200), (2, 200)):
+            departure_time = departure_anchor + timedelta(hours=departure_offset)
+            trip_ids.append(
+                await connection.fetchval(
+                    """
+                        INSERT INTO trips (
+                            bus_id,
+                            driver_profile_id,
+                            departure_time,
+                            arrival_time,
+                            price
+                        )
+                        VALUES ($1, $2, $3, $4, $5)
+                        RETURNING id
+                    """,
+                    bus_id,
+                    seeded_data["driver_profile_id"],
+                    departure_time,
+                    departure_time + timedelta(hours=8),
+                    price,
+                )
+            )
+
+    expected_orders = {
+        "price_asc": [trip_ids[1], trip_ids[2], trip_ids[3], trip_ids[0]],
+        "price_desc": [trip_ids[0], trip_ids[2], trip_ids[3], trip_ids[1]],
+        "departure_asc": trip_ids,
+        "departure_desc": [trip_ids[2], trip_ids[3], trip_ids[1], trip_ids[0]],
+    }
+
+    try:
+        for sort, expected_ids in expected_orders.items():
+            response = await api_client.get(
+                "/api/v1/tickets",
+                params={
+                    "origin": "Sort Origin",
+                    "destination": "Sort Destination",
+                    "sort": sort,
+                    "limit": 100,
+                },
+            )
+            assert response.status_code == 200
+            assert [ticket["trip_id"] for ticket in response.json()] == expected_ids
+
+        invalid = await api_client.get(
+            "/api/v1/tickets",
+            params={"sort": "arrival_asc"},
+        )
+        assert invalid.status_code == 422
+    finally:
+        async with test_pool.acquire() as connection:
+            await connection.execute("DELETE FROM trips WHERE bus_id = $1", bus_id)
+            await connection.execute("DELETE FROM buses WHERE id = $1", bus_id)
+            await connection.execute("DELETE FROM routes WHERE id = $1", route_id)
+
+
 async def test_operator_read_collections(
     api_client: httpx.AsyncClient,
     seeded_data: dict,
