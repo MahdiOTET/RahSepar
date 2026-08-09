@@ -1245,30 +1245,85 @@ h2 {
   border-color: transparent;
   background: transparent;
 }
-.demo-account {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+.demo-accounts {
   margin-block-start: 1.25rem;
   border: 1px dashed var(--color-border-strong);
   border-radius: var(--radius-sm);
   background: var(--color-surface-soft);
-  padding: 0.8rem;
+  padding: 0.9rem;
 }
-.demo-account div {
+.demo-accounts__heading {
+  margin-block-end: 0.75rem;
+}
+.demo-accounts__heading h2 {
+  margin-block-start: 0.12rem;
+  font-size: 1rem;
+}
+.demo-accounts__list {
   display: grid;
+  gap: 0.6rem;
 }
-.demo-account strong {
-  font-size: 0.84rem;
+.demo-account-option {
+  display: grid;
+  min-height: 4.5rem;
+  grid-template-columns: 2.65rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.8rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: 0.65rem 0.75rem;
+  text-align: right;
+  box-shadow: var(--shadow-sm);
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast),
+    transform var(--transition-fast);
 }
-.demo-account span {
+.demo-account-option:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-teal) 38%, var(--color-border));
+  background: color-mix(
+    in srgb,
+    var(--color-teal-soft) 35%,
+    var(--color-surface)
+  );
+}
+.demo-account-option:active:not(:disabled) {
+  transform: scale(0.985);
+}
+.demo-account-option__icon {
+  display: grid;
+  width: 2.65rem;
+  height: 2.65rem;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: var(--color-teal-soft);
+  color: var(--color-teal);
+}
+.demo-account-option__copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+.demo-account-option__copy strong {
+  font-size: 0.88rem;
+}
+.demo-account-option__copy span {
   color: var(--color-text-muted);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
 }
-.demo-account .button {
-  min-height: 2.75rem;
+.demo-account-option__action {
+  color: var(--color-teal);
   font-size: 0.78rem;
+  font-weight: 720;
+  white-space: nowrap;
+}
+.demo-accounts__note {
+  margin-block-start: 0.7rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.7;
 }
 
 .profile-card {
@@ -1690,9 +1745,11 @@ h2 {
   .seat-dialog__footer .button {
     width: 100%;
   }
-  .demo-account {
-    align-items: stretch;
-    flex-direction: column;
+  .demo-account-option {
+    grid-template-columns: 2.65rem minmax(0, 1fr);
+  }
+  .demo-account-option__action {
+    grid-column: 2;
   }
   .booking-card__route {
     grid-template-columns: auto 1fr;

@@ -84,6 +84,31 @@ async def test_bulk_seeder_is_valid_and_repeatable(
                   AND trip.departure_time > NOW()
             """
         )
+        demo_passenger = await connection.fetchrow(
+            """
+                SELECT
+                    app_user.mobile,
+                    app_user.wallet_balance,
+                    profile.display_name,
+                    profile.profile_type,
+                    EXISTS (
+                        SELECT 1
+                        FROM wallet_transactions AS transaction
+                        WHERE transaction.user_id = app_user.id
+                          AND transaction.transaction_type = 'wallet_credit'
+                    ) AS has_wallet_credit,
+                    (
+                        SELECT count(*)
+                        FROM bookings AS booking
+                        WHERE booking.passenger_profile_id = profile.id
+                    ) AS booking_count
+                FROM users AS app_user
+                JOIN profiles AS profile
+                    ON profile.user_id = app_user.id
+                   AND profile.profile_type = 'passenger'
+                WHERE app_user.mobile = '09800000001'
+            """
+        )
 
     assert first_count == 250
     assert second_count == 250
@@ -95,3 +120,9 @@ async def test_bulk_seeder_is_valid_and_repeatable(
     assert demo_catalog["route_count"] == 6
     assert demo_catalog["trip_count"] == 18
     assert demo_catalog["price_count"] > 3
+    assert demo_passenger["mobile"] == "09800000001"
+    assert demo_passenger["display_name"] == "مسافر نمایشی"
+    assert demo_passenger["profile_type"] == "passenger"
+    assert demo_passenger["wallet_balance"] > 0
+    assert demo_passenger["has_wallet_credit"] is True
+    assert demo_passenger["booking_count"] > 0

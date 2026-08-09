@@ -174,7 +174,7 @@ async def seed_bulk_bookings(
         (
             number,
             f"098{number:08d}",
-            f"Load Passenger {number}",
+            "مسافر نمایشی" if number == 1 else f"Load Passenger {number}",
             booking_anchor + timedelta(days=(number - 1) % 30, hours=(number - 1) % 24),
         )
         for number in range(1, passenger_count + 1)
