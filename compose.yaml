@@ -13,5 +13,19 @@ services:
       timeout: 5s
       retries: 10
 
+  app:
+    build:
+      context: .
+      args:
+        VITE_CLI_RELEASE_URL: ${VITE_CLI_RELEASE_URL:-https://github.com/MahdiOTET/BSLM-Entry-Task/releases/tag/v1.0.0}
+    environment:
+      DATABASE_URL: postgresql://bus_app:bus_app_secret@db:5432/bus_booking
+      JWT_SECRET: ${JWT_SECRET:-development-only-change-me}
+      SEED_BOOKINGS: ${SEED_BOOKINGS:-100000}
+    ports: ["8000:8000"]
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   postgres_data:

@@ -1,0 +1,14 @@
+.git
+.env
+.development-token
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+*.pdf
+buses.json
+frontend/node_modules
+frontend/dist
+frontend/*.tsbuildinfo
+tests

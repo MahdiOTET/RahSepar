@@ -39,6 +39,7 @@ button,
 a,
 select {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 button,
@@ -595,6 +596,10 @@ h2 {
 }
 .app-header__brand {
   display: inline-flex;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
 }
 .app-nav {
   display: flex;
@@ -750,7 +755,7 @@ h2 {
   box-shadow: var(--shadow-sm);
 }
 .segmented-control button {
-  min-height: 2.55rem;
+  min-height: 2.75rem;
   border: 0;
   border-radius: 0.65rem;
   background: transparent;
@@ -1085,7 +1090,7 @@ h2 {
   font-size: 0.78rem;
 }
 .demo-account .button {
-  min-height: 2.5rem;
+  min-height: 2.75rem;
   font-size: 0.78rem;
 }
 
@@ -1562,8 +1567,8 @@ h2 {
     margin-inline-end: 0.3rem;
   }
   .seat {
-    min-width: 2.35rem;
-    min-height: 2.5rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
   }
 }
 
