@@ -20,6 +20,22 @@ RahSepar is a complete demonstration of an Iranian intercity bus booking system.
 
 The React web application and Python CLI both use the same versioned FastAPI REST API. PostgreSQL constraints and transactional service operations protect wallet balances and prevent two passengers from confirming the same seat.
 
+## Contents
+
+- [What RahSepar does](#what-rahsepar-does)
+- [Interface tour](#interface-tour)
+- [Quick start](#quick-start)
+  - [Try the live demo](#try-the-live-demo)
+  - [Run locally with Docker Compose](#run-locally-with-docker-compose)
+  - [Manual development setup](#manual-development-setup)
+- [Architecture](#architecture)
+- [REST API](#rest-api)
+- [Data and seeding](#data-and-seeding)
+- [CLI](#cli)
+- [Tests and quality checks](#tests-and-quality-checks)
+- [Deployment configuration](#deployment-configuration)
+- [Versions](#versions)
+
 ## What RahSepar does
 
 | Area                 | Capabilities                                                                                                                                                                                 |
@@ -134,7 +150,9 @@ DATABASE_URL=postgresql://bus_app:bus_app_secret@127.0.0.1:5432/bus_booking
 JWT_SECRET=development-only-change-me
 ```
 
-Prepare and start the backend from Windows PowerShell. These commands use the virtual environment's interpreter directly, so activation is not required:
+#### Windows — PowerShell
+
+Run these commands from the repository root. They use the virtual environment's interpreter directly, so activation is not required:
 
 ```powershell
 py -3.11 -m venv venv
@@ -144,7 +162,9 @@ py -3.11 -m venv venv
 .\venv\Scripts\python.exe -m app serve --reload
 ```
 
-On Linux or macOS, run the equivalent sequence with:
+#### Linux and macOS — Bash or Zsh
+
+Run these commands from the repository root:
 
 ```bash
 python3.11 -m venv venv
@@ -156,9 +176,11 @@ python3.11 -m venv venv
 
 For a quicker development seed, use a smaller positive `--bookings` value; `100000` mirrors the deployed demonstration dataset.
 
-In a second terminal, start the frontend:
+#### Start the frontend — all platforms
 
-```powershell
+In a second terminal, run:
+
+```text
 cd frontend
 npm ci
 npm run dev
