@@ -13,7 +13,6 @@ from app.db import get_pool
 from app.main import app
 from app.security import hash_password
 
-
 MIGRATIONS_DIRECTORY = Path(__file__).resolve().parent.parent / "migrations"
 TEST_PASSWORD = "TestPass123!"
 
@@ -62,10 +61,9 @@ async def seeded_data(
     test_pool: asyncpg.Pool,
     test_password_hash: str,
 ) -> dict[str, int | datetime]:
-    async with test_pool.acquire() as connection:
-        async with connection.transaction():
-            await connection.execute(
-                """
+    async with test_pool.acquire() as connection, connection.transaction():
+        await connection.execute(
+            """
                     TRUNCATE TABLE
                         wallet_transactions,
                         bookings,
@@ -76,10 +74,10 @@ async def seeded_data(
                         users
                     RESTART IDENTITY CASCADE
                 """
-            )
+        )
 
-            operator_user_id = await connection.fetchval(
-                """
+        operator_user_id = await connection.fetchval(
+            """
                     INSERT INTO users (
                         mobile,
                         password_hash,
@@ -88,10 +86,10 @@ async def seeded_data(
                     VALUES ('09100000001', $1, 10000000.00)
                     RETURNING id
                 """,
-                test_password_hash,
-            )
-            second_user_id = await connection.fetchval(
-                """
+            test_password_hash,
+        )
+        second_user_id = await connection.fetchval(
+            """
                     INSERT INTO users (
                         mobile,
                         password_hash,
@@ -100,19 +98,19 @@ async def seeded_data(
                     VALUES ('09100000002', $1, 10000000.00)
                     RETURNING id
                 """,
-                test_password_hash,
-            )
-            driver_user_id = await connection.fetchval(
-                """
+            test_password_hash,
+        )
+        driver_user_id = await connection.fetchval(
+            """
                     INSERT INTO users (mobile, password_hash)
                     VALUES ('09100000003', $1)
                     RETURNING id
                 """,
-                test_password_hash,
-            )
+            test_password_hash,
+        )
 
-            operator_passenger_profile_id = await connection.fetchval(
-                """
+        operator_passenger_profile_id = await connection.fetchval(
+            """
                     INSERT INTO profiles (
                         user_id,
                         display_name,
@@ -121,10 +119,10 @@ async def seeded_data(
                     VALUES ($1, 'Test Operator Passenger', 'passenger')
                     RETURNING id
                 """,
-                operator_user_id,
-            )
-            await connection.execute(
-                """
+            operator_user_id,
+        )
+        await connection.execute(
+            """
                     INSERT INTO profiles (
                         user_id,
                         display_name,
@@ -132,10 +130,10 @@ async def seeded_data(
                     )
                     VALUES ($1, 'Test Operator', 'operator')
                 """,
-                operator_user_id,
-            )
-            second_passenger_profile_id = await connection.fetchval(
-                """
+            operator_user_id,
+        )
+        second_passenger_profile_id = await connection.fetchval(
+            """
                     INSERT INTO profiles (
                         user_id,
                         display_name,
@@ -144,10 +142,10 @@ async def seeded_data(
                     VALUES ($1, 'Second Passenger', 'passenger')
                     RETURNING id
                 """,
-                second_user_id,
-            )
-            driver_profile_id = await connection.fetchval(
-                """
+            second_user_id,
+        )
+        driver_profile_id = await connection.fetchval(
+            """
                     INSERT INTO profiles (
                         user_id,
                         display_name,
@@ -156,18 +154,18 @@ async def seeded_data(
                     VALUES ($1, 'Test Driver', 'driver')
                     RETURNING id
                 """,
-                driver_user_id,
-            )
+            driver_user_id,
+        )
 
-            route_id = await connection.fetchval(
-                """
+        route_id = await connection.fetchval(
+            """
                     INSERT INTO routes (origin, destination)
                     VALUES ('Tehran', 'Tabriz')
                     RETURNING id
                 """
-            )
-            bus_id = await connection.fetchval(
-                """
+        )
+        bus_id = await connection.fetchval(
+            """
                     INSERT INTO buses (
                         route_id,
                         plate_number,
@@ -177,13 +175,13 @@ async def seeded_data(
                     VALUES ($1, 'TEST-001', 'Test Coach', 40)
                     RETURNING id
                 """,
-                route_id,
-            )
+            route_id,
+        )
 
-            departure_time = datetime.now(UTC) + timedelta(days=2)
-            arrival_time = departure_time + timedelta(hours=8)
-            trip_id = await connection.fetchval(
-                """
+        departure_time = datetime.now(UTC) + timedelta(days=2)
+        arrival_time = departure_time + timedelta(hours=8)
+        trip_id = await connection.fetchval(
+            """
                     INSERT INTO trips (
                         bus_id,
                         driver_profile_id,
@@ -194,14 +192,14 @@ async def seeded_data(
                     VALUES ($1, $2, $3, $4, 1000000.00)
                     RETURNING id
                 """,
-                bus_id,
-                driver_profile_id,
-                departure_time,
-                arrival_time,
-            )
+            bus_id,
+            driver_profile_id,
+            departure_time,
+            arrival_time,
+        )
 
-            await connection.executemany(
-                """
+        await connection.executemany(
+            """
                     INSERT INTO wallet_transactions (
                         user_id,
                         transaction_type,
@@ -209,8 +207,8 @@ async def seeded_data(
                     )
                     VALUES ($1, 'wallet_credit', 10000000.00)
                 """,
-                [(operator_user_id,), (second_user_id,)],
-            )
+            [(operator_user_id,), (second_user_id,)],
+        )
 
     return {
         "operator_user_id": operator_user_id,

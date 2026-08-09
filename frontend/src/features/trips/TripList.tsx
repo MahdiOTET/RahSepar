@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, RefObject } from "react";
 
 import type { Ticket } from "../../types/api";
 import { TripCard } from "./TripCard";
@@ -9,9 +9,9 @@ interface TripListProps {
   onSelect: (trip: Ticket) => void;
 }
 
-export function TripList({ tickets, onSelect }: TripListProps) {
-  const listRef = useRef<HTMLDivElement>(null);
+type RevealStyle = CSSProperties & { "--trip-reveal-delay": string };
 
+function useCardReveal(listRef: RefObject<HTMLDivElement | null>): void {
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
@@ -49,27 +49,31 @@ export function TripList({ tickets, onSelect }: TripListProps) {
       observer.disconnect();
       list.classList.remove("trip-list--reveal-ready");
     };
-  }, []);
+  }, [listRef]);
+}
+
+function revealDelay(index: number): RevealStyle {
+  return {
+    "--trip-reveal-delay": `${index < 6 ? index * 40 : 0}ms`,
+  };
+}
+
+export function TripList({ tickets, onSelect }: TripListProps) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useCardReveal(listRef);
 
   return (
     <div className="trip-list" ref={listRef}>
-      {tickets.map((trip, index) => {
-        const revealDelay = index < 6 ? index * 40 : 0;
-        return (
-          <div
-            className="trip-card-reveal"
-            data-trip-reveal
-            key={trip.trip_id}
-            style={
-              {
-                "--trip-reveal-delay": `${revealDelay}ms`,
-              } as CSSProperties
-            }
-          >
-            <TripCard trip={trip} onSelect={onSelect} />
-          </div>
-        );
-      })}
+      {tickets.map((trip, index) => (
+        <div
+          className="trip-card-reveal"
+          data-trip-reveal
+          key={trip.trip_id}
+          style={revealDelay(index)}
+        >
+          <TripCard trip={trip} onSelect={onSelect} />
+        </div>
+      ))}
     </div>
   );
 }

@@ -22,9 +22,20 @@ async def test_login_current_user_and_invalid_credentials(
         json={"mobile": "09100000001", "password": "WrongPass123!"},
     )
     assert invalid_login.status_code == 401
+    assert invalid_login.json() == {"detail": "Invalid Mobile or Password"}
+    assert invalid_login.headers["www-authenticate"] == "Bearer"
 
     missing_token = await api_client.get("/api/v1/users/me")
     assert missing_token.status_code == 401
+    assert missing_token.headers["www-authenticate"] == "Bearer"
+
+    invalid_token = await api_client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": "Bearer invalid-token"},
+    )
+    assert invalid_token.status_code == 401
+    assert invalid_token.json() == {"detail": "Invalid or expired access token"}
+    assert invalid_token.headers["www-authenticate"] == "Bearer"
 
 
 async def test_gui_catalog_seats_and_personal_bookings(

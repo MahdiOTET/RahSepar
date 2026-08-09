@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BusFront, Plus, X } from "lucide-react";
 
 import { LoadingState } from "../../components/LoadingState";
@@ -32,16 +32,16 @@ export function FleetPanel() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const loadBuses = async () => {
+  const loadBuses = useCallback(async () => {
     const result = await api.get<Bus[]>("/buses?limit=200", true);
     setBuses(result);
-  };
+  }, []);
 
   useEffect(() => {
     void loadBuses()
       .catch((reason: unknown) => setError(toPersianError(reason)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadBuses]);
 
   const submit = async () => {
     setSubmitting(true);

@@ -36,6 +36,14 @@ class TicketSort(str, Enum):
     DEPARTURE_DESC = "departure_desc"
 
 
+class TicketQuery(BaseModel):
+    origin: str | None = Field(default=None, min_length=2, max_length=100)
+    destination: str | None = Field(default=None, min_length=2, max_length=100)
+    sort: TicketSort = TicketSort.PRICE_ASC
+    limit: int = Field(default=20, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
+
+
 class TicketResponse(BaseModel):
     trip_id: int
     origin: str

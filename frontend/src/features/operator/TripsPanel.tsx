@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CalendarPlus, Plus, X } from "lucide-react";
 
 import { LoadingState } from "../../components/LoadingState";
@@ -41,7 +41,7 @@ export function TripsPanel() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     const [tripRows, busRows, driverRows] = await Promise.all([
       api.get<OperatorTrip[]>("/trips?limit=100", true),
       api.get<Bus[]>("/buses?limit=200", true),
@@ -50,13 +50,13 @@ export function TripsPanel() {
     setTrips(tripRows);
     setBuses(busRows.filter((bus) => bus.is_active));
     setDrivers(driverRows.filter((driver) => driver.is_active));
-  };
+  }, []);
 
   useEffect(() => {
     void loadData()
       .catch((reason: unknown) => setError(toPersianError(reason)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadData]);
 
   const createTrip = async () => {
     setSubmitting(true);

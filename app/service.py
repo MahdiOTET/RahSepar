@@ -1,8 +1,23 @@
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import asyncpg
 
+from app.domain import TicketSearchCriteria, TripSchedule
+from app.errors import (
+    BookingConflictError,
+    BookingForbiddenError,
+    BookingNotFoundError,
+    BookingValidationError,
+    BusImportValidationError,
+    InvalidAccessTokenError,
+    InvalidCredentialError,
+    ReportValidationError,
+    TripConflictError,
+    TripNotFoundError,
+    TripValidationError,
+)
 from app.repository import (
     count_passenger_bookings_today,
     credit_wallet,
@@ -47,8 +62,9 @@ from app.schemas import (
     MonthlyBusReportRow,
     OperatorTripResponse,
     RouteResponse,
+    TicketQuery,
     TicketResponse,
-    TicketSort,
+    TripCreateRequest,
     TripResponse,
     TripSeatMapResponse,
 )
@@ -59,9 +75,18 @@ from app.security import (
     verify_password,
 )
 
+DAILY_BOOKING_LIMIT = 20
+MIN_REPORT_YEAR = 2000
+MAX_REPORT_YEAR = 2100
 
-class InvalidCredentialError(Exception):
-    pass
+
+@dataclass(frozen=True)
+class NormalizedBusImport:
+    origin: str
+    destination: str
+    plate_number: str
+    model: str | None
+    capacity: int
 
 
 async def authenticate_user(
@@ -69,28 +94,21 @@ async def authenticate_user(
     mobile: str,
     password: str,
 ) -> str:
-
     user = await get_user_by_mobile(pool, mobile)
 
-    if user is None or not user["is_active"]:
-        raise InvalidCredentialError()
-
-    password_is_valid = verify_password(password, user["password_hash"])
-
-    if not password_is_valid:
+    if (
+        user is None
+        or not user["is_active"]
+        or not verify_password(password, user["password_hash"])
+    ):
         raise InvalidCredentialError()
 
     return create_access_token(user["id"])
 
 
-class InvalidAccessTokenError(Exception):
-    pass
-
-
 async def resolve_access_token(pool: asyncpg.Pool, token: str) -> asyncpg.Record:
     try:
         user_id = decode_access_token(token)
-
     except TokenValidationError as err:
         raise InvalidAccessTokenError() from err
 
@@ -104,20 +122,16 @@ async def resolve_access_token(pool: asyncpg.Pool, token: str) -> asyncpg.Record
 
 async def list_available_tickets(
     pool: asyncpg.Pool,
-    origin: str | None,
-    destination: str | None,
-    sort: TicketSort,
-    limit: int,
-    offset: int,
+    query: TicketQuery,
 ) -> list[TicketResponse]:
-    rows = await get_available_tickets(
-        pool=pool,
-        origin=origin.strip() if origin else None,
-        destination=destination.strip() if destination else None,
-        sort=sort.value,
-        limit=limit,
-        offset=offset,
+    criteria = TicketSearchCriteria(
+        origin=query.origin.strip() if query.origin else None,
+        destination=query.destination.strip() if query.destination else None,
+        sort=query.sort.value,
+        limit=query.limit,
+        offset=query.offset,
     )
+    rows = await get_available_tickets(pool, criteria)
 
     return [TicketResponse(**dict(row)) for row in rows]
 
@@ -139,22 +153,6 @@ async def get_trip_seats(
     return TripSeatMapResponse(**dict(row))
 
 
-class BookingForbiddenError(Exception):
-    pass
-
-
-class BookingNotFoundError(Exception):
-    pass
-
-
-class BookingValidationError(Exception):
-    pass
-
-
-class BookingConflictError(Exception):
-    pass
-
-
 async def create_booking(
     pool: asyncpg.Pool,
     user_id: int,
@@ -162,36 +160,16 @@ async def create_booking(
     seat_number: int,
 ) -> BookingResponse:
     async with pool.acquire() as connection, connection.transaction():
-        user, passenger_profile_id, trip = await get_booking_context(
-            connection, user_id, trip_id
-        )
-
-        if user is None:
-            raise BookingForbiddenError("Active user was not found")
-
-        if passenger_profile_id is None:
-            raise BookingForbiddenError("Passenger profile is required")
-
-        if trip is None:
-            raise BookingNotFoundError("Trip was not found")
-
-        if trip["status"] != "scheduled" or trip["departure_time"] <= datetime.now(UTC):
-            raise BookingConflictError("Trip is not available for booking")
-
-        if seat_number > trip["capacity"]:
-            raise BookingValidationError(
-                f"Seat number must be between 1 and {trip['capacity']}"
-            )
+        context = await get_booking_context(connection, user_id, trip_id)
+        passenger_profile_id, trip = _require_booking_context(context)
+        _validate_booking_availability(trip, seat_number)
 
         daily_count = await count_passenger_bookings_today(
             connection, passenger_profile_id
         )
 
-        if daily_count >= 20:
+        if daily_count >= DAILY_BOOKING_LIMIT:
             raise BookingConflictError("Daily booking limit has been reached")
-
-        if trip["confirmed_bookings"] >= trip["capacity"]:
-            raise BookingConflictError("Trip is full")
 
         booking = await insert_confirmed_booking(
             connection=connection,
@@ -211,15 +189,46 @@ async def create_booking(
 
         await insert_booking_payment(connection, user_id, booking["id"], trip["price"])
 
-        return BookingResponse(
-            id=booking["id"],
-            trip_id=booking["trip_id"],
-            seat_number=booking["seat_number"],
-            paid_price=booking["paid_price"],
-            status=booking["status"],
-            booked_at=booking["booked_at"],
-            remaining_wallet_balance=remaining_balance,
+        return _booking_response(booking, remaining_balance)
+
+
+def _require_booking_context(
+    context: tuple[asyncpg.Record | None, int | None, asyncpg.Record | None],
+) -> tuple[int, asyncpg.Record]:
+    active_user, passenger_profile_id, trip = context
+    if active_user is None:
+        raise BookingForbiddenError("Active user was not found")
+    if passenger_profile_id is None:
+        raise BookingForbiddenError("Passenger profile is required")
+    if trip is None:
+        raise BookingNotFoundError("Trip was not found")
+    return passenger_profile_id, trip
+
+
+def _validate_booking_availability(trip: asyncpg.Record, seat_number: int) -> None:
+    if trip["status"] != "scheduled" or trip["departure_time"] <= datetime.now(UTC):
+        raise BookingConflictError("Trip is not available for booking")
+    if seat_number > trip["capacity"]:
+        raise BookingValidationError(
+            f"Seat number must be between 1 and {trip['capacity']}"
         )
+    if trip["confirmed_bookings"] >= trip["capacity"]:
+        raise BookingConflictError("Trip is full")
+
+
+def _booking_response(
+    booking: asyncpg.Record,
+    remaining_balance: Decimal,
+) -> BookingResponse:
+    return BookingResponse(
+        id=booking["id"],
+        trip_id=booking["trip_id"],
+        seat_number=booking["seat_number"],
+        paid_price=booking["paid_price"],
+        status=booking["status"],
+        booked_at=booking["booked_at"],
+        remaining_wallet_balance=remaining_balance,
+    )
 
 
 async def cancel_booking(
@@ -234,13 +243,7 @@ async def cancel_booking(
             raise BookingNotFoundError("Booking was not found")
 
         if booking["status"] == "cancelled":
-            return BookingCancellationResponse(
-                id=booking["id"],
-                status=booking["status"],
-                cancelled_at=booking["cancelled_at"],
-                refunded_amount=booking["paid_price"],
-                remaining_wallet_balance=booking["wallet_balance"],
-            )
+            return _cancellation_response(booking, booking["wallet_balance"])
 
         cancelled_booking = await mark_booking_cancelled(
             connection=connection, booking_id=booking_id
@@ -263,13 +266,20 @@ async def cancel_booking(
             amount=booking["paid_price"],
         )
 
-        return BookingCancellationResponse(
-            id=cancelled_booking["id"],
-            status=cancelled_booking["status"],
-            cancelled_at=cancelled_booking["cancelled_at"],
-            refunded_amount=cancelled_booking["paid_price"],
-            remaining_wallet_balance=remaining_balance,
-        )
+        return _cancellation_response(cancelled_booking, remaining_balance)
+
+
+def _cancellation_response(
+    booking: asyncpg.Record,
+    remaining_balance: Decimal,
+) -> BookingCancellationResponse:
+    return BookingCancellationResponse(
+        id=booking["id"],
+        status=booking["status"],
+        cancelled_at=booking["cancelled_at"],
+        refunded_amount=booking["paid_price"],
+        remaining_wallet_balance=remaining_balance,
+    )
 
 
 async def list_user_bookings(
@@ -280,10 +290,6 @@ async def list_user_bookings(
     return [BookingListItemResponse(**dict(row)) for row in rows]
 
 
-class BusImportValidationError(Exception):
-    pass
-
-
 async def import_buses(
     pool: asyncpg.Pool,
     buses: list[BusImportItem],
@@ -291,34 +297,18 @@ async def import_buses(
     imported_buses: list[BusResponse] = []
 
     async with pool.acquire() as connection, connection.transaction():
-        for bus in buses:
-            origin = bus.origin.strip()
-            destination = bus.destination.strip()
-            plate_number = bus.plate_number.strip()
-            model = bus.model.strip() if bus.model else None
-
-            if len(origin) < 2 or len(destination) < 2:
-                raise BusImportValidationError(
-                    "Origin and destination must contain at least two characters"
-                )
-
-            if origin.casefold() == destination.casefold():
-                raise BusImportValidationError(
-                    "Origin and destination must be different"
-                )
-
-            if not plate_number:
-                raise BusImportValidationError("Plate number must not be empty")
-
+        for bus in map(_normalize_bus_import, buses):
             route_id = await upsert_route(
-                connection=connection, origin=origin, destination=destination
+                connection=connection,
+                origin=bus.origin,
+                destination=bus.destination,
             )
 
             imported_bus = await upsert_bus(
                 connection=connection,
                 route_id=route_id,
-                plate_number=plate_number,
-                model=model,
+                plate_number=bus.plate_number,
+                model=bus.model,
                 capacity=bus.capacity,
             )
 
@@ -327,6 +317,25 @@ async def import_buses(
         return BusImportResponse(
             imported_count=len(imported_buses), buses=imported_buses
         )
+
+
+def _normalize_bus_import(bus: BusImportItem) -> NormalizedBusImport:
+    normalized = NormalizedBusImport(
+        origin=bus.origin.strip(),
+        destination=bus.destination.strip(),
+        plate_number=bus.plate_number.strip(),
+        model=bus.model.strip() if bus.model else None,
+        capacity=bus.capacity,
+    )
+    if len(normalized.origin) < 2 or len(normalized.destination) < 2:
+        raise BusImportValidationError(
+            "Origin and destination must contain at least two characters"
+        )
+    if normalized.origin.casefold() == normalized.destination.casefold():
+        raise BusImportValidationError("Origin and destination must be different")
+    if not normalized.plate_number:
+        raise BusImportValidationError("Plate number must not be empty")
+    return normalized
 
 
 async def list_operator_buses(
@@ -352,82 +361,75 @@ async def list_operator_trips(
     return [OperatorTripResponse(**dict(row)) for row in rows]
 
 
-class TripNotFoundError(Exception):
-    pass
-
-
-class TripValidationError(Exception):
-    pass
-
-
-class TripConflictError(Exception):
-    pass
-
-
 async def create_trip(
     pool: asyncpg.Pool,
-    bus_id: int,
-    driver_profile_id: int,
-    departure_time: datetime,
-    arrival_time: datetime,
-    price: Decimal,
+    request: TripCreateRequest,
 ) -> TripResponse:
-    if departure_time.tzinfo is None or departure_time.utcoffset() is None:
-        raise TripValidationError("Departure time must include a timezone offset")
-
-    if arrival_time.tzinfo is None or arrival_time.utcoffset() is None:
-        raise TripValidationError("Arrival time must include a timezone offset")
-
-    normalized_departure = departure_time.astimezone(UTC)
-    normalized_arrival = arrival_time.astimezone(UTC)
-
-    if normalized_departure <= datetime.now(UTC):
-        raise TripValidationError("Departure time must be in the future")
-
-    if normalized_arrival <= normalized_departure:
-        raise TripValidationError("Arrival time must be after departure time")
+    normalized_departure, normalized_arrival = _normalize_trip_schedule(
+        request.departure_time,
+        request.arrival_time,
+    )
+    schedule = TripSchedule(
+        bus_id=request.bus_id,
+        driver_profile_id=request.driver_profile_id,
+        departure_time=normalized_departure,
+        arrival_time=normalized_arrival,
+        price=request.price,
+    )
 
     async with pool.acquire() as connection, connection.transaction():
         bus, driver = await get_trip_creation_context(
             connection=connection,
-            bus_id=bus_id,
-            driver_profile_id=driver_profile_id,
+            bus_id=schedule.bus_id,
+            driver_profile_id=schedule.driver_profile_id,
         )
 
-        if bus is None:
-            raise TripNotFoundError("Active bus was not found")
+        _require_trip_creation_context(bus, driver)
 
-        if driver is None:
-            raise TripNotFoundError("Active driver profile was not found")
+        conflicts = await get_trip_schedule_conflicts(connection, schedule)
 
-        conflicts = await get_trip_schedule_conflicts(
-            connection=connection,
-            bus_id=bus_id,
-            driver_profile_id=driver_profile_id,
-            departure_time=normalized_departure,
-            arrival_time=normalized_arrival,
-        )
+        _validate_trip_conflicts(conflicts)
 
-        if conflicts["bus_has_conflict"]:
-            raise TripConflictError("Bus already has an overlapping trip")
-
-        if conflicts["driver_has_conflict"]:
-            raise TripConflictError("Driver already has an overlapping trip")
-
-        trip = await insert_trip(
-            connection=connection,
-            bus_id=bus_id,
-            driver_profile_id=driver_profile_id,
-            departure_time=normalized_departure,
-            arrival_time=normalized_arrival,
-            price=price,
-        )
+        trip = await insert_trip(connection, schedule)
 
         return TripResponse(**dict(trip))
 
 
-class ReportValidationError(Exception):
-    pass
+def _normalize_trip_schedule(
+    departure_time: datetime,
+    arrival_time: datetime,
+) -> tuple[datetime, datetime]:
+    normalized_departure = _to_utc(departure_time, "Departure")
+    normalized_arrival = _to_utc(arrival_time, "Arrival")
+
+    if normalized_departure <= datetime.now(UTC):
+        raise TripValidationError("Departure time must be in the future")
+    if normalized_arrival <= normalized_departure:
+        raise TripValidationError("Arrival time must be after departure time")
+    return normalized_departure, normalized_arrival
+
+
+def _to_utc(value: datetime, field_name: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise TripValidationError(f"{field_name} time must include a timezone offset")
+    return value.astimezone(UTC)
+
+
+def _require_trip_creation_context(
+    bus: asyncpg.Record | None,
+    driver: asyncpg.Record | None,
+) -> None:
+    if bus is None:
+        raise TripNotFoundError("Active bus was not found")
+    if driver is None:
+        raise TripNotFoundError("Active driver profile was not found")
+
+
+def _validate_trip_conflicts(conflicts: asyncpg.Record) -> None:
+    if conflicts["bus_has_conflict"]:
+        raise TripConflictError("Bus already has an overlapping trip")
+    if conflicts["driver_has_conflict"]:
+        raise TripConflictError("Driver already has an overlapping trip")
 
 
 async def build_hourly_booking_report(
@@ -450,8 +452,10 @@ async def build_monthly_bus_report(
     year: int,
     month: int,
 ) -> MonthlyBusReportResponse:
-    if year < 2000 or year > 2100:
-        raise ReportValidationError("Year must be between 2000 and 2100")
+    if year < MIN_REPORT_YEAR or year > MAX_REPORT_YEAR:
+        raise ReportValidationError(
+            f"Year must be between {MIN_REPORT_YEAR} and {MAX_REPORT_YEAR}"
+        )
 
     if month < 1 or month > 12:
         raise ReportValidationError("Month must be between 1 and 12")

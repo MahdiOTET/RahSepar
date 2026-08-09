@@ -1,30 +1,19 @@
 import { useState } from "react";
-import { Eye, EyeOff, LogIn, ShieldCheck, UserRound } from "lucide-react";
+import { Eye, EyeOff, LogIn, ShieldCheck } from "lucide-react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../../app/AuthContext";
 import { StatusMessage } from "../../components/StatusMessage";
 import { toPersianError } from "../../lib/format";
+import { DemoAccountOptions } from "./DemoAccountOptions";
+import { DEMO_PASSWORD, type DemoAccountId } from "./demoAccounts";
 
-const DEMO_PASSWORD = "DevPass123!";
-const DEMO_ACCOUNTS = [
-  {
-    id: "passenger",
-    label: "مسافر نمایشی",
-    description: "رزرو و مشاهده سفرهای من",
-    mobile: "09800000001",
-    defaultPath: "/bookings",
-  },
-  {
-    id: "operator",
-    label: "اپراتور سامانه",
-    description: "مدیریت ناوگان، سفرها و گزارش‌ها",
-    mobile: "09123456789",
-    defaultPath: "/manage",
-  },
-] as const;
-
-type DemoAccountId = (typeof DEMO_ACCOUNTS)[number]["id"];
+interface LoginAttempt {
+  mobile: string;
+  password: string;
+  defaultPath: string;
+  demoId?: DemoAccountId;
+}
 
 function safeReturnPath(value: string | null): string | null {
   return value?.startsWith("/") && !value.startsWith("//") ? value : null;
@@ -42,16 +31,16 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const requestedReturnPath = safeReturnPath(searchParams.get("returnTo"));
 
-  const authenticate = async (
-    nextMobile: string,
-    nextPassword: string,
-    defaultPath: string,
-    demoId: DemoAccountId | null = null,
-  ) => {
+  const authenticate = async ({
+    mobile: nextMobile,
+    password: nextPassword,
+    defaultPath,
+    demoId = undefined,
+  }: LoginAttempt) => {
     setMobile(nextMobile);
     setPassword(nextPassword);
     setSubmitting(true);
-    setActiveDemo(demoId);
+    setActiveDemo(demoId ?? null);
     setError("");
 
     try {
@@ -91,7 +80,7 @@ export default function LoginPage() {
           className="stack-form"
           onSubmit={(event) => {
             event.preventDefault();
-            void authenticate(mobile, password, "/");
+            void authenticate({ mobile, password, defaultPath: "/" });
           }}
         >
           <div className="form-field">
@@ -150,51 +139,18 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <aside className="demo-accounts" aria-labelledby="demo-accounts-title">
-          <div className="demo-accounts__heading">
-            <span className="eyebrow">ورود سریع</span>
-            <h2 id="demo-accounts-title">یک حساب نمایشی انتخاب کنید</h2>
-          </div>
-          <div className="demo-accounts__list">
-            {DEMO_ACCOUNTS.map((account) => {
-              const Icon = account.id === "passenger" ? UserRound : ShieldCheck;
-              const isActive = activeDemo === account.id;
-
-              return (
-                <button
-                  className="demo-account-option"
-                  type="button"
-                  key={account.id}
-                  disabled={submitting}
-                  onClick={() =>
-                    void authenticate(
-                      account.mobile,
-                      DEMO_PASSWORD,
-                      account.defaultPath,
-                      account.id,
-                    )
-                  }
-                >
-                  <span className="demo-account-option__icon">
-                    <Icon size={20} aria-hidden="true" />
-                  </span>
-                  <span className="demo-account-option__copy">
-                    <strong>{account.label}</strong>
-                    <span>{account.description}</span>
-                    <span dir="ltr">{account.mobile}</span>
-                  </span>
-                  <span className="demo-account-option__action">
-                    {isActive ? "در حال ورود…" : "ورود سریع"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <p className="demo-accounts__note">
-            رمز هر دو حساب <span dir="ltr">{DEMO_PASSWORD}</span> است. اطلاعات
-            این محیط نمایشی و میان بازدیدکنندگان مشترک است.
-          </p>
-        </aside>
+        <DemoAccountOptions
+          activeAccount={activeDemo}
+          disabled={submitting}
+          onSelect={(account) =>
+            void authenticate({
+              mobile: account.mobile,
+              password: DEMO_PASSWORD,
+              defaultPath: account.defaultPath,
+              demoId: account.id,
+            })
+          }
+        />
       </section>
     </div>
   );

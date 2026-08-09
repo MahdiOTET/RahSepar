@@ -1,6 +1,8 @@
 export type ProfileType = "passenger" | "operator" | "driver";
 export type TripStatus = "scheduled" | "cancelled" | "completed";
 export type BookingStatus = "confirmed" | "cancelled";
+export type TicketSort =
+  "price_asc" | "price_desc" | "departure_asc" | "departure_desc";
 
 export interface TokenResponse {
   access_token: string;

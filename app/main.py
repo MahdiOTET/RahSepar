@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import router as api_router
+from app.api_errors import register_service_error_handler
 from app.db import create_pool
 
 PROJECT_DIRECTORY = Path(__file__).resolve().parent.parent
@@ -38,7 +39,7 @@ def add_frontend(application: FastAPI, directory: Path) -> None:
         )
 
     @application.get("/{path:path}", include_in_schema=False)
-    async def frontend(path: str) -> FileResponse:
+    async def serve_frontend(path: str) -> FileResponse:
         if path == "api" or path.startswith("api/"):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
@@ -55,9 +56,12 @@ def add_frontend(application: FastAPI, directory: Path) -> None:
 
 def create_app(frontend_directory: Path = FRONTEND_DIRECTORY) -> FastAPI:
     application = FastAPI(
-        title="Intercity Bus Ticket Booking", version="2.0.0", lifespan=lifespan
+        title="Intercity Bus Ticket Booking",
+        version="2.0.0",
+        lifespan=lifespan,
     )
 
+    register_service_error_handler(application)
     application.include_router(api_router, prefix="/api/v1")
 
     @application.get("/health", tags=["system"])

@@ -1,7 +1,9 @@
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import asyncpg
+
+from app.domain import TicketSearchCriteria, TripSchedule
 
 
 async def get_user_by_mobile(pool: asyncpg.Pool, mobile: str) -> asyncpg.Record | None:
@@ -24,7 +26,7 @@ async def get_user_with_profiles(
 ) -> asyncpg.Record | None:
     return await pool.fetchrow(
         """
-            SELECT 
+            SELECT
                 u.id,
                 u.mobile,
                 u.is_active,
@@ -64,11 +66,7 @@ async def get_user_with_profiles(
 
 async def get_available_tickets(
     pool: asyncpg.Pool,
-    origin: str | None,
-    destination: str | None,
-    sort: str,
-    limit: int,
-    offset: int,
+    criteria: TicketSearchCriteria,
 ) -> list[asyncpg.Record]:
     return await pool.fetch(
         """
@@ -137,11 +135,11 @@ async def get_available_tickets(
                 LIMIT $4
                 OFFSET $5                 
         """,
-        origin,
-        destination,
-        sort,
-        limit,
-        offset,
+        criteria.origin,
+        criteria.destination,
+        criteria.sort,
+        criteria.limit,
+        criteria.offset,
     )
 
 
@@ -690,10 +688,7 @@ async def get_trip_creation_context(
 
 async def get_trip_schedule_conflicts(
     connection: asyncpg.Connection,
-    bus_id: int,
-    driver_profile_id: int,
-    departure_time: datetime,
-    arrival_time: datetime,
+    schedule: TripSchedule,
 ) -> asyncpg.Record:
     return await connection.fetchrow(
         """
@@ -715,20 +710,16 @@ async def get_trip_schedule_conflicts(
                       AND arrival_time > $3
                 ) AS driver_has_conflict
         """,
-        bus_id,
-        driver_profile_id,
-        departure_time,
-        arrival_time,
+        schedule.bus_id,
+        schedule.driver_profile_id,
+        schedule.departure_time,
+        schedule.arrival_time,
     )
 
 
 async def insert_trip(
     connection: asyncpg.Connection,
-    bus_id: int,
-    driver_profile_id: int,
-    departure_time: datetime,
-    arrival_time: datetime,
-    price: Decimal,
+    schedule: TripSchedule,
 ) -> asyncpg.Record:
     return await connection.fetchrow(
         """
@@ -771,11 +762,11 @@ async def insert_trip(
             JOIN profiles AS driver
                 ON driver.id = created_trip.driver_profile_id
         """,
-        bus_id,
-        driver_profile_id,
-        departure_time,
-        arrival_time,
-        price,
+        schedule.bus_id,
+        schedule.driver_profile_id,
+        schedule.departure_time,
+        schedule.arrival_time,
+        schedule.price,
     )
 
 
