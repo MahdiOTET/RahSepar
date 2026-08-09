@@ -3,6 +3,7 @@ import { ArrowLeftRight, BusFront, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../app/AuthContext";
+import { useToast } from "../../app/ToastContext";
 import { EmptyState } from "../../components/EmptyState";
 import { LoadingState } from "../../components/LoadingState";
 import { StatusMessage } from "../../components/StatusMessage";
@@ -22,6 +23,7 @@ type SortOrder = "price_asc" | "price_desc";
 export default function TripsPage() {
   const navigate = useNavigate();
   const { user, refreshUser } = useAuth();
+  const { showToast } = useToast();
   const [routes, setRoutes] = useState<RouteOption[]>([]);
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
@@ -30,7 +32,6 @@ export default function TripsPage() {
   const [selectedTrip, setSelectedTrip] = useState<Ticket | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [searched, setSearched] = useState(false);
 
   useEffect(() => {
@@ -101,8 +102,8 @@ export default function TripsPage() {
 
   const booked = async (booking: BookingResult) => {
     setSelectedTrip(null);
-    setNotice(
-      `رزرو شما با شماره ${formatNumber(booking.id)} با موفقیت ثبت شد.`,
+    showToast(
+      `رزرو شماره ${formatNumber(booking.id)} با موفقیت ثبت شد و مبلغ آن از کیف پول پرداخت شد.`,
     );
     invalidateInitialTickets();
     await Promise.all([fetchTickets(), refreshUser()]);
@@ -192,7 +193,6 @@ export default function TripsPage() {
         </form>
       </section>
 
-      {notice && <StatusMessage type="success">{notice}</StatusMessage>}
       {error && <StatusMessage type="error">{error}</StatusMessage>}
 
       <section className="trip-results" aria-labelledby="trip-results-title">

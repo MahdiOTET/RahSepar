@@ -376,6 +376,109 @@ h2 {
   background: var(--color-info-soft);
 }
 
+.toast-viewport {
+  position: fixed;
+  z-index: 240;
+  inset-inline: 1rem;
+  inset-block-end: 1.25rem;
+  display: grid;
+  justify-items: center;
+  pointer-events: none;
+}
+
+.toast {
+  --toast-accent: var(--color-teal);
+  --toast-soft: var(--color-info-soft);
+
+  direction: rtl;
+  display: flex;
+  width: min(100%, 34rem);
+  min-height: 4rem;
+  align-items: center;
+  gap: 0.7rem;
+  border: 1px solid
+    color-mix(in srgb, var(--toast-accent) 34%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  box-shadow: var(--shadow-lg);
+  padding: 0.55rem 0.6rem 0.55rem 0.75rem;
+  pointer-events: auto;
+  transform-origin: bottom center;
+  backdrop-filter: blur(18px) saturate(145%);
+  animation:
+    toast-in var(--transition-base) both,
+    toast-out 180ms ease-in 4.32s forwards;
+}
+
+.toast--success {
+  --toast-accent: var(--color-success);
+  --toast-soft: var(--color-success-soft);
+}
+
+.toast--error {
+  --toast-accent: var(--color-danger);
+  --toast-soft: var(--color-danger-soft);
+}
+
+.toast__icon {
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--toast-soft);
+  color: var(--toast-accent);
+}
+
+.toast__message {
+  min-width: 0;
+  flex: 1;
+  color: var(--color-text);
+  font-size: 0.92rem;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.toast__dismiss {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.toast__dismiss:hover {
+  background: var(--color-surface-soft);
+  color: var(--color-text);
+}
+
+.toast__dismiss:active {
+  transform: scale(0.94);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.8rem) scale(0.98);
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(0.35rem) scale(0.99);
+  }
+}
+
 .empty-state {
   display: grid;
   min-height: 20rem;
@@ -1506,6 +1609,10 @@ h2 {
   .app-main {
     padding-block: 1.3rem 2.5rem;
   }
+  .toast-viewport {
+    inset-inline: 0.65rem;
+    inset-block-end: calc(5.2rem + env(safe-area-inset-bottom));
+  }
   .bottom-nav {
     position: fixed;
     z-index: 120;
@@ -1667,11 +1774,15 @@ h2 {
   .bottom-nav,
   .splash__skip,
   .trip-search,
-  .seat-dialog__footer {
+  .seat-dialog__footer,
+  .toast {
     backdrop-filter: none;
   }
   .app-header,
   .bottom-nav {
+    background: var(--color-surface);
+  }
+  .toast {
     background: var(--color-surface);
   }
 }
@@ -1684,7 +1795,8 @@ h2 {
   .bottom-nav,
   .trip-card,
   .booking-card,
-  .auth-card {
+  .auth-card,
+  .toast {
     box-shadow: none;
   }
 }

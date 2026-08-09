@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "../../app/ToastContext";
 import TripsPage from "./TripsPage";
 
 vi.mock("../../app/AuthContext", () => ({
@@ -25,9 +26,11 @@ vi.mock("../../lib/catalog", () => ({
 describe("TripsPage route search", () => {
   it("swaps a selected origin and destination", async () => {
     render(
-      <MemoryRouter>
-        <TripsPage />
-      </MemoryRouter>,
+      <ToastProvider>
+        <MemoryRouter>
+          <TripsPage />
+        </MemoryRouter>
+      </ToastProvider>,
     );
 
     const origin = screen.getByLabelText("مبدأ") as HTMLSelectElement;

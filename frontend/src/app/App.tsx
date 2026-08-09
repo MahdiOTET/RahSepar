@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { AuthProvider } from "./AuthContext";
 import { ThemeProvider } from "./ThemeContext";
+import { ToastProvider } from "./ToastContext";
 import { LoadingState } from "../components/LoadingState";
 import { ProtectedRoute } from "../components/ProtectedRoute";
 import { hasSeenSplash, SplashScreen } from "../components/SplashScreen";
@@ -66,9 +67,11 @@ function AppContent() {
 export function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

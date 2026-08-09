@@ -3,6 +3,7 @@ import { CalendarClock, CircleX, MapPin, TicketCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../../app/AuthContext";
+import { useToast } from "../../app/ToastContext";
 import { EmptyState } from "../../components/EmptyState";
 import { LoadingState } from "../../components/LoadingState";
 import { StatusMessage } from "../../components/StatusMessage";
@@ -18,12 +19,12 @@ import type { BookingCancellation, BookingListItem } from "../../types/api";
 
 export default function BookingsPage() {
   const { refreshUser } = useAuth();
+  const { showToast } = useToast();
   const [bookings, setBookings] = useState<BookingListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -62,7 +63,7 @@ export default function BookingsPage() {
             : booking,
         ),
       );
-      setNotice(
+      showToast(
         `رزرو شماره ${formatNumber(bookingId)} لغو و مبلغ آن به کیف پول بازگردانده شد.`,
       );
       setConfirming(null);
@@ -82,7 +83,6 @@ export default function BookingsPage() {
         <p>جزئیات سفر، شماره صندلی و وضعیت هر رزرو را اینجا ببینید.</p>
       </header>
 
-      {notice && <StatusMessage type="success">{notice}</StatusMessage>}
       {error && <StatusMessage type="error">{error}</StatusMessage>}
 
       {loading ? (
