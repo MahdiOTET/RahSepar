@@ -5,10 +5,10 @@ services:
       POSTGRES_DB: bus_booking
       POSTGRES_USER: bus_app
       POSTGRES_PASSWORD: bus_app_secret
-    ports: ["5432:5432"]
-    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    ports: [ "5432:5432" ]
+    volumes: [ "postgres_data:/var/lib/postgresql/data" ]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bus_app -d bus_booking"]
+      test: [ "CMD-SHELL", "pg_isready -U bus_app -d bus_booking" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -17,12 +17,12 @@ services:
     build:
       context: .
       args:
-        VITE_CLI_RELEASE_URL: ${VITE_CLI_RELEASE_URL:-https://github.com/MahdiOTET/BSLM-Entry-Task/releases/tag/v1.0.0}
+        VITE_CLI_RELEASE_URL: ${VITE_CLI_RELEASE_URL:-https://github.com/MahdiOTET/RahSepar/releases/tag/v1.0.0}
     environment:
       DATABASE_URL: postgresql://bus_app:bus_app_secret@db:5432/bus_booking
       JWT_SECRET: ${JWT_SECRET:-development-only-change-me}
       SEED_BOOKINGS: ${SEED_BOOKINGS:-100000}
-    ports: ["8000:8000"]
+    ports: [ "8000:8000" ]
     depends_on:
       db:
         condition: service_healthy

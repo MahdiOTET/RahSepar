@@ -4,7 +4,7 @@ WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
-ARG VITE_CLI_RELEASE_URL=https://github.com/MahdiOTET/BSLM-Entry-Task/releases/tag/v1.0.0
+ARG VITE_CLI_RELEASE_URL=https://github.com/MahdiOTET/RahSepar/releases/tag/v1.0.0
 ENV VITE_CLI_RELEASE_URL=${VITE_CLI_RELEASE_URL}
 RUN npm run build
 

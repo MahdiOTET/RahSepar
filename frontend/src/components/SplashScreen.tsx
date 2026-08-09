@@ -7,7 +7,7 @@ import { preloadHome } from "../lib/catalog";
 const SPLASH_SEEN_KEY = "rahsepar.splash-seen";
 const SPLASH_DURATION_MS = 5_000;
 const DEFAULT_RELEASE_URL =
-  "https://github.com/MahdiOTET/BSLM-Entry-Task/releases/tag/v1.0.0";
+  "https://github.com/MahdiOTET/RahSepar/releases/tag/v1.0.0";
 
 export function hasSeenSplash(): boolean {
   return sessionStorage.getItem(SPLASH_SEEN_KEY) === "true";
